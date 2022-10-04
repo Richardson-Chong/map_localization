@@ -1,0 +1,8 @@
+<launch>
+  <!--launch rs_to_vel.launch-->
+  <!-- <include file="$(find rs_to_velodyne)/launch/rs_to_vel.launch"/> -->
+    <!--launch odometry publisher-->
+  <node name = "gnss_odom_pub" pkg = "odometry_publisher" type = "gnss_odom_pub"/>
+
+  <include file="$(find rslidar_sdk)/launch/start.launch"/>
+</launch>

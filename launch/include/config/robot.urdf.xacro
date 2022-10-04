@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<robot name="lio" xmlns:xacro="http://tixiaoshan.github.io/">
+  <xacro:property name="PI" value="3.1415926535897931" />
+
+  <link name="chassis_link"></link>
+
+  <link name="base_link"></link>
+  <joint name="base_link_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis_link" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
+  <link name="imu_link"> </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="chassis_link" />
+    <child link="imu_link" />
+    <origin xyz="-8.086759e-01 3.195559e-01 -7.997231e-01" rpy="0 0 0" />
+    <!-- <origin xyz="-8.2e-01 0.0 -1.4" rpy="0 0 0" /> -->
+    <!-- <origin xyz="0.0 0.0 0.0" rpy="0 0 0" /> -->
+  </joint>
+
+  <link name="velodyne"> </link>
+  <joint name="velodyne_joint" type="fixed">
+    <parent link="chassis_link" />
+    <child link="velodyne" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+
+  
+
+  <!-- 添加自己的传感器坐标系到base_link变换关系 -->
+  <link name="imu_enu_link"> </link>
+  <joint name="imu_enu_joint" type="fixed">
+    <parent link="chassis_link" />
+    <child link="imu_enu_link" />
+    <origin xyz="-8.086759e-01 3.195559e-01 -7.997231e-01" rpy="0 0 0" />
+    <!-- <origin xyz="-8.2e-01 0.0 -1.4" rpy="0 0 0" /> -->
+    <!-- <origin xyz="0.0 0.0 0.0" rpy="0 0 0" /> -->
+  </joint>
+
+  <!-- -8.086759e-01 3.195559e-01 -7.997231e-01 -->
+  <!-- 0.0133737 -0.107341 0.11349  CS75 -->
+  <!-- <origin xyz="-8.2e-01 0.0 -1.0" rpy="0 0 0" /> -->
+
+</robot>

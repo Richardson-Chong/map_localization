@@ -1,0 +1,39 @@
+<launch>
+
+    <arg name="project" default="map_localization"/>
+    
+    <!-- Parameters -->
+    <!-- school -->
+    <rosparam file="$(find map_localization)/config/params_32.yaml" command="load" />
+    <!-- ndt -->
+    <!-- <rosparam file="$(find map_localization)/config/params_lio_sam_test.yaml" command="load" /> -->
+    <!--test-->
+    <!-- <rosparam file="$(find map_localization)/config/params.yaml" command="load" /> -->
+
+
+    <!--- LOAM -->
+    <include file="$(find map_localization)/launch/include/module_loam.launch" />
+    
+    <!-- ICP, GICP, NDT, GICP_OMP, NDT_OMP, FAST_GICP(recommended), or FAST_VGICP -->
+        <param name="registration_method" value="FAST_GICP" />
+        <param name="reg_num_threads" value="8" />
+        <param name="reg_transformation_epsilon" value="0.001"/>
+        <param name="reg_maximum_iterations" value="64"/>
+        <param name="reg_max_correspondence_distance" value="10"/>
+        <param name="reg_max_optimizer_iterations" value="64"/>
+        <param name="reg_stepsize" value="0.1" />
+        <param name="reg_use_reciprocal_correspondences" value="false"/>
+        <param name="reg_correspondence_randomness" value="20"/>
+        <param name="reg_resolution" value="0.25" />
+        <param name="reg_nn_search_method" value="DIRECT7" />
+
+    <!--- Robot State TF -->
+    <!-- <include file="$(find lio_sam)/launch/include/module_robot_state_publisher.launch" /> -->
+
+    <!--- Run Navsat -->
+    <!-- <include file="$(find lio_sam)/launch/include/module_navsat.launch" /> -->
+
+    <!--- Run Rviz-->
+    <include file="$(find map_localization)/launch/include/module_rviz.launch" />
+
+</launch>
