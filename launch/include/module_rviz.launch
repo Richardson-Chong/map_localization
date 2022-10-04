@@ -4,7 +4,7 @@
 
     <!--- Run Rviz-->
     <!-- <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find lio_sam)/launch/include/config/rviz.rviz" /> -->
-    <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find lio_sam)/launch/include/config/rviz_feature_test.rviz" />
+    <!-- <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find lio_sam)/launch/include/config/rviz_feature_test.rviz" /> -->
     <!-- <node pkg="rviz" type="rviz" name="$(arg project)_rviz" args="-d $(find map_localization)/launch/include/config/map_localization.rviz" /> -->
 
 </launch>
