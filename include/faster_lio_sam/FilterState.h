@@ -12,7 +12,6 @@
 #define GW_ 15
 enum class GravityType{Normal, S2M};
 
-template<GravityType GT = GravityType::Normal>
 class FilterState
 {
 public:
@@ -21,20 +20,30 @@ public:
     Eigen::Quaternionf qbn_;  // rotation from b-frame to n-frame
     Eigen::Vector3f ba_;   // acceleartion bias
     Eigen::Vector3f bw_;   // gyroscope bias
+
+    GravityType GT;
     Eigen::Vector3f gn_;   // gravity
     S2<float> Gs2; 
 
 public:
-    FilterState(){setIdentity();}
+    FilterState()
+    {
+        GT = GravityType::Normal;
+        setIdentity();
+    };
+    FilterState(const GravityType& gt) : GT(gt) 
+    {
+        setIdentity();
+    }
     FilterState(const Eigen::Vector3f& rn, const Eigen::Vector3f& vn,
                 const Eigen::Quaternionf& qbn, const Eigen::Vector3f& ba,
                 const Eigen::Vector3f& bw, const Eigen::Vector3f& gn) : 
                 rn_(rn), vn_(vn), qbn_(qbn), ba_(ba), bw_(bw), gn_(gn){};
 
+    FilterState& operator=(const FilterState& state);
     FilterState& operator+(const Eigen::MatrixXf& deltaX);
     FilterState& operator+=(const Eigen::MatrixXf& deltaX);
     Eigen::MatrixXf operator-(const FilterState& state);
-    void operator=(const FilterState& state);
 
     ~FilterState(){}
 
@@ -43,8 +52,8 @@ public:
     void updateVelocity(float dt);
 };
 
-template<GravityType GT>
-FilterState<GT>& FilterState<GT>::operator+(const Eigen::MatrixXf& deltaX)
+
+FilterState& FilterState::operator+(const Eigen::MatrixXf& deltaX)
 {
     Eigen::Vector3f delta_angle_axis(deltaX.block<3, 1>(3, 0));
     Eigen::Quaternionf dq(Eigen::AngleAxisf(delta_angle_axis.norm(), delta_angle_axis.normalized()).toRotationMatrix());
@@ -64,8 +73,7 @@ FilterState<GT>& FilterState<GT>::operator+(const Eigen::MatrixXf& deltaX)
     return *this;
 }
 
-template<GravityType GT>
-FilterState<GT>& FilterState<GT>::operator+=(const Eigen::MatrixXf& deltaX)
+FilterState& FilterState::operator+=(const Eigen::MatrixXf& deltaX)
 {
     Eigen::Vector3f delta_angle_axis(deltaX.block<3, 1>(3, 0));
     Eigen::Quaternionf dq(Eigen::AngleAxisf(delta_angle_axis.norm(), delta_angle_axis.normalized()).toRotationMatrix());
@@ -84,8 +92,7 @@ FilterState<GT>& FilterState<GT>::operator+=(const Eigen::MatrixXf& deltaX)
     return *this;
 }
 
-template<GravityType GT>
-Eigen::MatrixXf FilterState<GT>::operator-(const FilterState<GT>& state)
+Eigen::MatrixXf FilterState::operator-(const FilterState& state)
 {
     Eigen::MatrixXf ret;
     if(GT == GravityType::Normal) 
@@ -113,8 +120,7 @@ Eigen::MatrixXf FilterState<GT>::operator-(const FilterState<GT>& state)
     return ret;
 }
 
-template<GravityType GT>
-void FilterState<GT>::operator=(const FilterState<GT>& state)
+FilterState& FilterState::operator=(const FilterState& state)
 {
     qbn_    = state.qbn_;
     rn_     = state.rn_;
@@ -122,16 +128,21 @@ void FilterState<GT>::operator=(const FilterState<GT>& state)
     ba_ = state.ba_;
     bw_ = state.bw_;
     
-    if(GT == GravityType::Normal)
+    if(state.GT == GravityType::Normal)
+    {
+        GT = GravityType::Normal;
         gn_ = state.gn_;
+    }
     else
     {
+        GT = GravityType::S2M;
         Gs2 = state.Gs2;
     }
+
+    return *this;
 }
 
-template<GravityType GT>
-void FilterState<GT>::setIdentity()
+void FilterState::setIdentity()
 {
     rn_.setZero();
     vn_.setZero();
@@ -141,8 +152,7 @@ void FilterState<GT>::setIdentity()
     gn_ << 0.0, 0.0, -9.805;
 }
 
-template<GravityType GT>
-void FilterState<GT>::updateVelocity(float dt)
+void FilterState::updateVelocity(float dt)
 {
     vn_ = rn_ / dt;
 }

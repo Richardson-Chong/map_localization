@@ -80,8 +80,8 @@ public:
 	//self - other
 	void boxminus(Eigen::Matrix<scalar, 2, 1>& res, const S2<scalar, S2_typ>& other) const {
 		//check!!
-		// scalar v_sin = (GetSkewMatrix(vec)*other.vec).norm();
-		scalar v_sin = (GetSkewMatrix(other.vec)*vec).norm();
+		scalar v_sin = (GetSkewMatrix(vec)*other.vec).norm();
+		// scalar v_sin = (GetSkewMatrix(other.vec)*vec).norm();
 		scalar v_cos = vec.transpose() * other.vec;
 		scalar theta = std::atan2(v_sin, v_cos);
 		if(v_sin < tolerance<scalar>())

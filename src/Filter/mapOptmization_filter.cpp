@@ -77,8 +77,8 @@ public:
     float transformInLidar[6];
     float transformTobeMapped[18];
     float transformTobeMappedLast[18];
-    FilterState<> filterState;
-    FilterState<> intermediateState;
+    FilterState filterState;
+    FilterState intermediateState;
     Eigen::Vector3d accBias;
     Eigen::Vector3d gyrBias;
     //Data from other cpp

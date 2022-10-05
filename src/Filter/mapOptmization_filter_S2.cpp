@@ -79,10 +79,8 @@ public:
     float transformTobeMapped[18];
     float transformTobeMappedLast[18];
 
-    // FilterState<GravityType::S2M> filterState;
-    // FilterState<GravityType::S2M> intermediateState;
-    FilterState<> filterState;
-    FilterState<> intermediateState;
+    FilterState filterState;
+    FilterState intermediateState;
 
     Eigen::Vector3d accBias;
     Eigen::Vector3d gyrBias;
@@ -420,6 +418,7 @@ public:
             errVec_.resize(18, 1);
             HRH.resize(18, 18);
             HRH_inv.resize(18, 18);
+            filterState.GT = GravityType::Normal;
             filterState.gn_ = Eigen::Vector3f(0.0, 0.0, -imuGravity);
         }
         else
@@ -434,7 +433,8 @@ public:
             errVec_.resize(17, 1);
             HRH.resize(17, 17);
             HRH_inv.resize(17, 17);
-            // filterState.Gs2 = S2<float, 98090, 10000>(Eigen::Vector3f(0.0, 0.0, -imuGravity));
+            filterState.GT = GravityType::S2M;
+            filterState.Gs2 = S2<float>(Eigen::Vector3f(0.0, 0.0, -imuGravity));
         }
         F_t.setZero();
         J_t.setIdentity();
@@ -900,7 +900,11 @@ public:
         transformTobeMapped[1] = pitch;
         transformTobeMapped[2] = yaw;
 
-        filterState.Gs2 = S2<float>(Eigen::Vector3f(0.0, 0.0, -imuGravity));
+        float g_norm = static_cast<float>(mean_acc.norm());
+        if(!USE_S2 && abs(g_norm - imuGravity) < 0.5)
+            filterState.gn_ = Eigen::Vector3f(0.0, 0.0, -g_norm);
+        else if (USE_S2 && abs(g_norm - imuGravity) < 0.5)
+            filterState.Gs2 = S2<float>(Eigen::Vector3f(0.0, 0.0, -g_norm));
 
         return true;
     }
