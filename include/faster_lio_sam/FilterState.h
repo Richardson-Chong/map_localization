@@ -18,6 +18,7 @@ public:
     Eigen::Vector3f rn_;
     Eigen::Vector3f vn_;   // velocity in n-frame
     Eigen::Quaternionf qbn_;  // rotation from b-frame to n-frame
+    Eigen::Vector3f euler_;
     Eigen::Vector3f ba_;   // acceleartion bias
     Eigen::Vector3f bw_;   // gyroscope bias
 
@@ -70,6 +71,9 @@ FilterState& FilterState::operator+(const Eigen::MatrixXf& deltaX)
         Gs2.boxplus(deltaX.block<2, 1>(GW_, 0));
     }
     
+    euler_ += deltaX.block<3, 1>(ROT_, 0);
+    NormalizeAngle(euler_);
+    
     return *this;
 }
 
@@ -88,6 +92,9 @@ FilterState& FilterState::operator+=(const Eigen::MatrixXf& deltaX)
     {
         Gs2.boxplus(deltaX.block<2, 1>(GW_, 0));
     }
+
+    euler_ += deltaX.block<3, 1>(ROT_, 0);
+    NormalizeAngle(euler_);
     
     return *this;
 }
@@ -117,6 +124,10 @@ Eigen::MatrixXf FilterState::operator-(const FilterState& state)
         ret.block<2, 1>(GW_, 0) = tem;
     }
 
+    //记得用s2流型的时候要改回去
+    Eigen::Vector3f vec = state.euler_ - euler_;
+    ret.block<3, 1>(ROT_, 0) = NormalizeAngle(vec);
+
     return ret;
 }
 
@@ -139,6 +150,8 @@ FilterState& FilterState::operator=(const FilterState& state)
         Gs2 = state.Gs2;
     }
 
+    euler_ = state.euler_;
+
     return *this;
 }
 
@@ -150,6 +163,8 @@ void FilterState::setIdentity()
     ba_.setZero();
     bw_.setZero();
     gn_ << 0.0, 0.0, -9.805;
+
+    euler_.setZero();
 }
 
 void FilterState::updateVelocity(float dt)

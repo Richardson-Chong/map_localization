@@ -73,6 +73,7 @@ public:
     Eigen::Matrix<float, 18, 1> errVec_;
     Eigen::Matrix<float, 18, 18> HRH;
     Eigen::Matrix<float, 18, 18> HRH_inv;
+    Eigen::MatrixXf R;
     //states
     float transformInLidar[6];
     float transformTobeMapped[18];
@@ -402,6 +403,7 @@ public:
         }
         transformTobeMapped[GW_+2] = -imuGravity;
         transformTobeMappedLast[GW_+2] = -imuGravity;
+        filterState.GT = GravityType::Normal;
         filterState.gn_ = Eigen::Vector3f(0.0, 0.0, -imuGravity);
 
         F_t.setZero();
@@ -869,6 +871,9 @@ public:
         transformTobeMapped[1] = pitch;
         transformTobeMapped[2] = yaw;
 
+        float g_norm = static_cast<float>(mean_acc.norm());
+        filterState.gn_ = Eigen::Vector3f(0.0, 0.0, -g_norm);
+    
         return true;
     }
 
@@ -1284,9 +1289,15 @@ public:
         float cov_pos = sigma * sigma;
         float cov_angle = 0.5 * cov_pos;
         float cov_vel = 25;
+        float cov_bias = 1e-4;
         P_t.block<3,3>(POS_,POS_) = Eigen::Vector3f(cov_pos, cov_pos, cov_pos).asDiagonal();
         P_t.block<3,3>(ROT_, ROT_) = Eigen::Vector3f(cov_angle, cov_angle, cov_angle).asDiagonal();
         P_t.block<3,3>(VEL_, VEL_) = Eigen::Vector3f(cov_vel, cov_vel, cov_vel).asDiagonal();
+        P_t.block<6,6>(BIA_, BIA_) = Eigen::Matrix<float, 6, 6>::Identity()*cov_bias;
+        if(!USE_S2)
+            P_t.block<3,3>(GW_, GW_) = Eigen::Vector3f(0.01, 0.01, 0.01).asDiagonal();
+        else 
+            P_t.block<2,2>(GW_, GW_) = Eigen::Vector2f(0.01, 0.01).asDiagonal();
         // ROS_INFO_STREAM("P0 is:"<<endl<<P_t<<endl;);
 
         setFilerPose();
@@ -1296,10 +1307,16 @@ public:
     {   
         float cov_pos = 1;
         float cov_vel = 25;
+        float cov_bias = 1e-3;
         P_t.block<3,3>(POS_,POS_) = Eigen::Vector3f(cov_pos, cov_pos, cov_pos).asDiagonal();
         P_t.block<3,3>(ROT_, ROT_) = mat;
         P_t.block<3,3>(VEL_, VEL_) = Eigen::Vector3f(cov_vel, cov_vel, cov_vel).asDiagonal();
-        ROS_INFO_STREAM("P0 is:"<<endl<<P_t<<endl;);
+        P_t.block<6,6>(VEL_, VEL_) = Eigen::Matrix<float, 6, 6>::Identity()*cov_bias;
+        if(!USE_S2)
+            P_t.block<3,3>(GW_, GW_) = Eigen::Vector3f(0.01, 0.01, 0.01).asDiagonal();
+        else 
+            P_t.block<2,2>(GW_, GW_) = Eigen::Vector2f(0.01, 0.01).asDiagonal();
+        // ROS_INFO_STREAM("P0 is:"<<endl<<P_t<<endl;);
 
         setFilerPose();
     }
@@ -1314,6 +1331,10 @@ public:
         filterState.qbn_ = wTimuAffine.rotation();
         filterState.rn_ = wTimuAffine.translation();
         // sysStatus = OTHER_SCAN;
+
+        //Euler state
+        filterState.euler_ = Eigen::Vector3f(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+        //End
     }
 
     void statePredict()
@@ -1404,55 +1425,76 @@ public:
             Eigen::Matrix3f Rix = R_transformTobeMappedlast*GetSkewMatrix(AccMinusBiaslast);
             Eigen::Matrix3f Rjx = R_transformTobeMapped*GetSkewMatrix(AccMinusBias);
 
-            F_t.block<3, 3>(ROT_, ROT_) = Eigen::Matrix3f::Identity() + GetSkewMatrix(-midGyrMinusBias);
-            F_t.block<3, 3>(ROT_, BIG_) = -dt*Eigen::Matrix3f::Identity();
-
-            F_t.block<3, 3>(VEL_, ROT_) = -0.5 * (Rix + Rjx*(Eigen::Matrix3f::Identity() -GetSkewMatrix(midGyrMinusBias)));
-            F_t.block<3, 3>(VEL_, BIA_) = -0.5 * (R_transformTobeMappedlast.toRotationMatrix() 
-                                                + R_transformTobeMapped.toRotationMatrix()) * dt;
-            F_t.block<3, 3>(VEL_, BIG_) = 0.5 * Rjx * dt;
-            F_t.block<3, 3>(VEL_, GW_)  = dt * Eigen::Matrix3f::Identity();
-
-            F_t.block<3, 3>(POS_, ROT_) = 0.5 * F_t.block<3, 3>(VEL_, ROT_) * dt;
-            F_t.block<3, 3>(POS_, VEL_) = dt*Eigen::Matrix3f::Identity();
-            F_t.block<3, 3>(POS_, BIA_) = 0.5 * F_t.block<3, 3>(VEL_, BIA_) * dt;
-            F_t.block<3, 3>(POS_, BIG_) = 0.5 * F_t.block<3, 3>(VEL_, BIG_) * dt;
-            F_t.block<3, 3>(POS_, GW_)  = 0.5 * F_t.block<3, 3>(VEL_, GW_)  * dt;
-            
-            G_t.setZero();
-            G_t.block<3, 3>(ROT_, 3) = 0.5 * Eigen::Matrix3f::Identity() * dt * 2;
-
-            G_t.block<3, 3>(VEL_, 0) = 0.5 * (R_transformTobeMapped.toRotationMatrix() + 
-                                              R_transformTobeMappedlast.toRotationMatrix()) * dt;
-            G_t.block<3, 3>(VEL_, 3) = -0.25 * Rjx * dt * 2;
-
-            G_t.block<3, 3>(POS_, 0) = 0.5 * dt * G_t.block<3, 3>(VEL_, 0);
-            G_t.block<3, 3>(POS_, 3) = 0.5 * dt * G_t.block<3, 3>(VEL_, 3);
-
-            G_t.block<3, 3>(BIA_, 6) = Eigen::Matrix<float, 3, 3>::Identity() * dt;
-            G_t.block<3, 3>(BIG_, 9) = Eigen::Matrix<float, 3, 3>::Identity() * dt;
-
-            //noise_ (imuAccNoise, imuGyrNoise, imuAccBiasN, imuGyrBiasN)
-            P_t = F_t * P_t * F_t.transpose() + G_t * noise_ * G_t.transpose();
-
-
-            // F_t.setIdentity();
-            // midAcc = 0.5*(thisImu.first + lastImu.first);
-            // midGyr = 0.5*(thisImu.second + lastImu.second);
-            // F_t.block<3, 3>(POS_, VEL_) = dt*Eigen::Matrix3f::Identity();
-            // F_t.block<3, 3>(ROT_, ROT_) = Eigen::Matrix3f::Identity() + GetSkewMatrix(-dt*(midGyr-filterState.bw_));
+            // //method 1
+            // F_t.block<3, 3>(ROT_, ROT_) = Eigen::Matrix3f::Identity() + GetSkewMatrix(-midGyrMinusBias);
             // F_t.block<3, 3>(ROT_, BIG_) = -dt*Eigen::Matrix3f::Identity();
-            // F_t.block<3, 3>(VEL_, ROT_) = -dt*filterState.qbn_.toRotationMatrix()*GetSkewMatrix(midAcc-filterState.ba_);
-            // F_t.block<3, 3>(VEL_, BIA_) = -dt*filterState.qbn_.toRotationMatrix();
-            // F_t.block<3, 3>(VEL_, GW_)  = dt*Eigen::Matrix3f::Identity();
 
+            // F_t.block<3, 3>(VEL_, ROT_) = -0.5 * (Rix + Rjx*(Eigen::Matrix3f::Identity() -GetSkewMatrix(midGyrMinusBias)));
+            // F_t.block<3, 3>(VEL_, BIA_) = -0.5 * (R_transformTobeMappedlast.toRotationMatrix() 
+            //                                     + R_transformTobeMapped.toRotationMatrix()) * dt;
+            // F_t.block<3, 3>(VEL_, BIG_) = 0.5 * Rjx * dt;
+            // if(!USE_S2)
+            //     F_t.block<3, 3>(VEL_, GW_)  = dt * Eigen::Matrix3f::Identity();
+            // else
+            // {
+            //     Eigen::Vector3f g_temp = filterState.Gs2.get_vect();
+            //     Eigen::Matrix<float, 3, 2>Bx;
+            //     filterState.Gs2.S2_Bx(Bx);
+            //     F_t.block<3, 2>(VEL_, GW_)  = dt * -GetSkewMatrix(g_temp) * Bx;
+            // }
+
+            // F_t.block<3, 3>(POS_, ROT_) = 0.5 * F_t.block<3, 3>(VEL_, ROT_) * dt;
+            // F_t.block<3, 3>(POS_, VEL_) = dt*Eigen::Matrix3f::Identity();
+            // F_t.block<3, 3>(POS_, BIA_) = 0.5 * F_t.block<3, 3>(VEL_, BIA_) * dt;
+            // F_t.block<3, 3>(POS_, BIG_) = 0.5 * F_t.block<3, 3>(VEL_, BIG_) * dt;
+            // if(!USE_S2)
+            //     F_t.block<3, 3>(POS_, GW_)  = 0.5 * F_t.block<3, 3>(VEL_, GW_)  * dt;
+            // else
+            //     F_t.block<3, 2>(POS_, GW_)  = 0.5 * F_t.block<3, 2>(VEL_, GW_)  * dt;
+            
             // G_t.setZero();
-            // G_t.block<3, 3>(VEL_, 0) = -filterState.qbn_.toRotationMatrix();
-            // G_t.block<3, 3>(ROT_, 3) = -Eigen::Matrix<float, 3, 3>::Identity();
-            // G_t.block<3, 3>(BIA_, 6) = Eigen::Matrix<float, 3, 3>::Identity();
-            // G_t.block<3, 3>(BIG_, 9) = Eigen::Matrix<float, 3, 3>::Identity();
+            // G_t.block<3, 3>(ROT_, 3) = 0.5 * Eigen::Matrix3f::Identity() * dt * 2;
 
-            // P_t = F_t * P_t * F_t.transpose() + (dt*G_t) * noise_ * (dt*G_t).transpose();
+            // G_t.block<3, 3>(VEL_, 0) = 0.5 * (R_transformTobeMapped.toRotationMatrix() + 
+            //                                   R_transformTobeMappedlast.toRotationMatrix()) * dt;
+            // G_t.block<3, 3>(VEL_, 3) = -0.25 * Rjx * dt * 2;
+
+            // G_t.block<3, 3>(POS_, 0) = 0.5 * dt * G_t.block<3, 3>(VEL_, 0);
+            // G_t.block<3, 3>(POS_, 3) = 0.5 * dt * G_t.block<3, 3>(VEL_, 3);
+
+            // G_t.block<3, 3>(BIA_, 6) = Eigen::Matrix<float, 3, 3>::Identity() * dt;
+            // G_t.block<3, 3>(BIG_, 9) = Eigen::Matrix<float, 3, 3>::Identity() * dt;
+
+            // //noise_ (imuAccNoise, imuGyrNoise, imuAccBiasN, imuGyrBiasN)
+            // P_t = F_t * P_t * F_t.transpose() + G_t * noise_ * G_t.transpose();
+
+
+            //method 2
+            F_t.setIdentity();
+            midAcc = 0.5*(thisImu.first + lastImu.first);
+            midGyr = 0.5*(thisImu.second + lastImu.second);
+            F_t.block<3, 3>(POS_, VEL_) = dt*Eigen::Matrix3f::Identity();
+            F_t.block<3, 3>(ROT_, ROT_) = Eigen::Matrix3f::Identity() + GetSkewMatrix(-dt*(midGyr-filterState.bw_));
+            F_t.block<3, 3>(ROT_, BIG_) = -dt*Eigen::Matrix3f::Identity();
+            F_t.block<3, 3>(VEL_, ROT_) = -dt*filterState.qbn_.toRotationMatrix()*GetSkewMatrix(midAcc-filterState.ba_);
+            F_t.block<3, 3>(VEL_, BIA_) = -dt*filterState.qbn_.toRotationMatrix();
+            if(!USE_S2)
+                F_t.block<3, 3>(VEL_, GW_)  = dt * Eigen::Matrix3f::Identity();
+            else
+            {
+                Eigen::Vector3f g_temp = filterState.Gs2.get_vect();
+                Eigen::Matrix<float, 3, 2>Bx;
+                filterState.Gs2.S2_Bx(Bx);
+                F_t.block<3, 2>(VEL_, GW_)  = dt * -GetSkewMatrix(g_temp) * Bx;
+            }
+
+            G_t.setZero();
+            G_t.block<3, 3>(VEL_, 0) = -filterState.qbn_.toRotationMatrix();
+            G_t.block<3, 3>(ROT_, 3) = -Eigen::Matrix<float, 3, 3>::Identity();
+            G_t.block<3, 3>(BIA_, 6) = Eigen::Matrix<float, 3, 3>::Identity();
+            G_t.block<3, 3>(BIG_, 9) = Eigen::Matrix<float, 3, 3>::Identity();
+
+            P_t = F_t * P_t * F_t.transpose() + (dt*G_t) * noise_ * (dt*G_t).transpose();
 
 
 
@@ -1524,39 +1566,71 @@ public:
         using M4f = Eigen::Matrix4f;
         
         residual_   = Eigen::Matrix<float, Eigen::Dynamic, 1>::Zero(laserCloudSelNum, 1);
+        R           = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Zero(laserCloudSelNum, laserCloudSelNum);
         H_k         = Eigen::Matrix<float, Eigen::Dynamic, 18>::Zero(laserCloudSelNum, 18);
         H_k_T_R_inv = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
         K_k         = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
         
         cout<<"Total corres nums: "<<laserCloudSelNum<<endl<<endl;
+
+        //Euler state
         for(int i=0; i< laserCloudSelNum; ++i)
         {
             PointType pt_orig = laserCloudOri->points[i];
             PointXYZIRPYT feature_param = coeffSel->points[i];
             V3f pt_orig_coor = V3f(pt_orig.x, pt_orig.y, pt_orig.z);
-            // V3f Aaj = Sophus::SO3f(intermediateState.qbn_).log().matrix();
 
+            
+            float roll = intermediateState.euler_[0], pitch = intermediateState.euler_[1], yaw = intermediateState.euler_[2];
+            float croll = cos(roll), sroll = sin(roll), 
+                  cpitch = cos(pitch), spitch = sin(pitch), 
+                  cyaw = cos(yaw), syaw = sin(yaw);
             V3f Jr_pt = V3f(feature_param.x, feature_param.y, feature_param.z);
             M3f Jpt_Aa = intermediateState.qbn_ * GetSkewMatrix(-pt_orig_coor);
             M3f Jpt_trans = M3f::Identity();
-            M3f JAa_deltaAa = M3f::Identity();  /*Amatrix(-Aaj);*/
+            M3f Jpt_rot = M3f::Zero();
+
+            Jpt_rot(0, 0) = (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[1] 
+                          + (croll * syaw - sroll * spitch * cyaw) * pt_orig_coor[2];
+            Jpt_rot(0, 1) = (-spitch * cyaw) * pt_orig_coor[0]
+                          + (sroll * cpitch * cyaw) * pt_orig_coor[1]
+                          + (croll * cpitch * cyaw) * pt_orig_coor[2];
+            Jpt_rot(0, 2) = (-cpitch * syaw) * pt_orig_coor[0]
+                          + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[1]
+                          + (sroll * cyaw - croll * spitch * syaw) * pt_orig_coor[2];
+            
+            Jpt_rot(1, 0) = (-sroll * cyaw + croll * spitch * syaw) * pt_orig_coor[1]
+                          + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[2];
+            Jpt_rot(1, 1) = (-spitch * syaw) * pt_orig_coor[0]
+                          + (sroll * cpitch * syaw) * pt_orig_coor[1];
+                          + (croll * cpitch * syaw) * pt_orig_coor[2];
+            Jpt_rot(1, 2) = (cpitch * cyaw) * pt_orig_coor[0]
+                          + (-croll * syaw + sroll * spitch * cyaw) * pt_orig_coor[1]
+                          + (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[2];
+            
+            Jpt_rot(2, 0) = (croll * cpitch) * pt_orig_coor[1]
+                          + (-sroll * cpitch) * pt_orig_coor[2];
+            Jpt_rot(2, 1) = (-cpitch) * pt_orig_coor[0]
+                          + (-sroll * spitch) * pt_orig_coor[1]
+                          + (-croll * spitch) * pt_orig_coor[2];
+            Jpt_rot(2, 2) = 0;
 
 
             H_k.block<1, 3>(i, POS_) = Jr_pt.transpose() * Jpt_trans / feature_param.roll;
-            H_k.block<1, 3>(i, ROT_) = Jr_pt.transpose() * Jpt_Aa * JAa_deltaAa / feature_param.roll;
+            H_k.block<1, 3>(i, ROT_) = Jr_pt.transpose() * Jpt_rot / feature_param.roll;
+            // H_k(i, ROT_) = 0;
+            // H_k(i, ROT_+1) = 0;
+
             H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll;
             residual_(i, 0) = 0 - feature_param.intensity / feature_param.roll;
+            R(i, i) = 1.0 / feature_param.roll;
         }
         
         errVec_ = move(intermediateState - filterState);
         // ROS_INFO_STREAM("errVec_: "<<endl<<errVec_.transpose()<<endl<<endl);
 
-        J_t.block<3, 3>(ROT_, ROT_) = Amatrix(errVec_.block<3, 1>(ROT_, 0)).transpose();
-
-        //calculate K_j
-        Jt_inv.block<3, 3>(ROT_, ROT_) = (J_t.block<3, 3>(ROT_, ROT_)).inverse();
         //check LIDAR_STD
-        Eigen::Matrix<float, 18, 18> P_tmp = LIDAR_STD * Jt_inv.transpose() * P_t_inv * Jt_inv;
+        Eigen::Matrix<float, 18, 18> P_tmp = LIDAR_STD * P_t_inv;
         
         HRH = H_k_T_R_inv*H_k+P_tmp;
         // ROS_INFO_STREAM("HRH: "<<endl<<HRH<<endl<<endl);
@@ -1565,7 +1639,7 @@ public:
         // ROS_INFO_STREAM("K_k: "<<endl<<K_k<<endl<<endl);
 
         //calculate dxj0
-        updateVec_ = -J_t * (errVec_) + K_k * (residual_ + H_k * J_t * errVec_);
+        updateVec_ = - (errVec_) + K_k * (residual_ + H_k * errVec_);
         // ROS_INFO_STREAM("updateVec_: "<<endl<<updateVec_<<endl<<endl);
 
         // Divergence determination
@@ -1617,29 +1691,38 @@ public:
 
     void updateState(double dt)
     {
-        P_t = (I18 - K_k * H_k) * J_t * P_t * J_t.transpose();
-        //reset delta states covariance
-        //utilize J_t as L_t
-        J_t.block<3, 3>(ROT_, ROT_) = Amatrix(updateVec_.block<3, 1>(ROT_, 0)).transpose();
-        P_t = J_t * P_t * J_t.transpose();
+        TicToc t_1;
+        Eigen::MatrixXf partial = I18 - K_k * H_k;
+        t_1.toc("Calculate I-KH");
+        // //method 1 P
+        // P_t = (I18 - K_k * H_k) * J_t * P_t * J_t.transpose();
+        // //method 2 P positive and symmetric
+        TicToc t_filter;
+        P_t = partial * J_t * P_t * J_t.transpose() * partial.transpose() + K_k * R * K_k.transpose();
+        t_filter.toc("Calculate P_t");
+        // //method 3 P symmetric
+        // Eigen::MatrixXf Ptangent = J_t * P_t * J_t.transpose();
+        // P_t = Ptangent - K_k * (H_k * Ptangent * H_k.transpose() + R) * K_k.transpose();
 
         //set kth pose in lidar frame
         filterState = intermediateState;
         cout<<"更新后的states: "<<endl
-                            <<filterState.qbn_.vec().transpose()<<" "<<endl
+                            <<filterState.euler_.transpose()<<" "<<endl
                             <<filterState.rn_.transpose()<<" "<<endl
                             <<filterState.vn_.transpose()<<" "<<endl
                             <<filterState.ba_.transpose()<<" "<<endl
                             <<filterState.bw_.transpose()<<" "<<endl
                             <<filterState.gn_.transpose()<<" "<<endl
                             <<endl;
-        Eigen::Affine3f T_transformTobeMapped;
-        T_transformTobeMapped.setIdentity();
-        T_transformTobeMapped.pretranslate(filterState.rn_);
-        T_transformTobeMapped.rotate(filterState.qbn_);
-        pcl::getTranslationAndEulerAngles(T_transformTobeMapped, 
-            transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-            transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+                            
+
+        transformTobeMapped[0] = filterState.euler_[0];
+        transformTobeMapped[1] = filterState.euler_[1];
+        transformTobeMapped[2] = filterState.euler_[2];
+
+        transformTobeMapped[3] = filterState.rn_[0];
+        transformTobeMapped[4] = filterState.rn_[1];
+        transformTobeMapped[5] = filterState.rn_[2];
 
         for(int i=0; i<3; i++)
         {
@@ -1668,13 +1751,15 @@ public:
                             <<filterState.bw_.transpose()<<" "<<endl
                             <<filterState.gn_.transpose()<<" "<<endl
                             <<endl;
-        Eigen::Affine3f T_transformTobeMapped;
-        T_transformTobeMapped.setIdentity();
-        T_transformTobeMapped.pretranslate(filterState.rn_);
-        T_transformTobeMapped.rotate(filterState.qbn_);
-        pcl::getTranslationAndEulerAngles(T_transformTobeMapped, 
-            transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-            transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
+        
+        
+        transformTobeMapped[0] = filterState.euler_[0];
+        transformTobeMapped[1] = filterState.euler_[1];
+        transformTobeMapped[2] = filterState.euler_[2];
+
+        transformTobeMapped[3] = filterState.rn_[0];
+        transformTobeMapped[4] = filterState.rn_[1];
+        transformTobeMapped[5] = filterState.rn_[2];
 
         for(int i=0; i<3; i++)
         {
@@ -1739,12 +1824,12 @@ public:
                     updateStatebyNotConverge(dt);
                 }
 
-                if(hasDiverged)
-                {
-                    //还没写完
-                    resetState();
-                    break;
-                }          
+                // if(hasDiverged)
+                // {
+                //     //还没写完
+                //     resetState();
+                //     break;
+                // }          
             }
             transformUpdate();
         } else {

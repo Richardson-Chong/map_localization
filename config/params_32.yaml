@@ -78,7 +78,7 @@ lio_sam:
   # Extrinsics (IMU -> LiDAR)
   # extrinsicTrans: [0.76844, -0.0631438, 0.189212]
 
-  extrinsicTrans: [-0.82, 0.0, -1.4]
+  # extrinsicTrans: [-0.82, 0.0, -1.4]
 
   extrinsicRot: [0.991601,-0.0450538, -0.12123,
                  0.0432943, 0.998916, -0.0171107,
@@ -99,7 +99,7 @@ lio_sam:
 #   surfThreshold: 0.001
   edgeFeatureMinValidNum: 10
   surfFeatureMinValidNum: 100
-  USE_CORNER: false
+  USE_CORNER: true
 
   # extract feature threshold
   MaxCornerSize: 20 #20

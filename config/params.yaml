@@ -62,7 +62,7 @@ lio_sam:
   # imuTimeOffset: -0.08
   imuTimeOffset: 0.0
   # ieskf
-  LIDAR_STD: 0.001
+  LIDAR_STD: 0.01
 
   # Ground Settings
   HeightThreshold: -1.6

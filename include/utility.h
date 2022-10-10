@@ -626,4 +626,28 @@ inline Eigen::Matrix<typename Derived::Scalar, 3, 3> Amatrix(const Eigen::Matrix
                + (1-cos(norm)) / norm * skew + (1 - sin(norm) / norm) * skew * skew;
 }
 
+// template <typename T>
+// T NormalizeAngle(const T& angle_degrees) {
+//     if (angle_degrees > T(M_PI))
+//         return angle_degrees - T(2*M_PI);
+//     else if (angle_degrees < T(-M_PI))
+//         return angle_degrees + T(2*M_PI);
+//     else
+//         return angle_degrees;
+// };
+
+template <typename T>
+Eigen::Matrix<T, 3, 1> NormalizeAngle(Eigen::Matrix<T, 3, 1>& angle_degrees)
+{
+    for(int i=0; i<3; ++i)
+    {
+        if (angle_degrees(i, 0) > T(M_PI))
+            angle_degrees(i, 0) = angle_degrees(i, 0) - T(2*M_PI);
+        else if (angle_degrees(i, 0) < T(-M_PI))
+            angle_degrees(i, 0) = angle_degrees(i, 0) + T(2*M_PI);
+    }
+
+    return angle_degrees;
+}
+
 #endif

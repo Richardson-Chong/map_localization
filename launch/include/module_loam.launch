@@ -9,8 +9,8 @@
     
     <!-- <node pkg="$(arg project)" type="$(arg project)_mapOptmization_feature"      name="$(arg project)_mapOptmization"       output="screen"     respawn="true"/>    -->
         
-    <!-- <node pkg="$(arg project)" type="$(arg project)_mapOptmization_filter"      name="$(arg project)_mapOptmization_filter"      output="screen"      />  -->
-    <node pkg="$(arg project)" type="$(arg project)_mapOptmization_filter_S2"      name="$(arg project)_mapOptmization_filter_S2"      output="screen"      /> 
+    <node pkg="$(arg project)" type="$(arg project)_mapOptmization_filter"      name="$(arg project)_mapOptmization_filter"      output="screen"      /> 
+    <!-- <node pkg="$(arg project)" type="$(arg project)_mapOptmization_filter_S2"      name="$(arg project)_mapOptmization_filter_S2"      output="screen"      />  -->
 
     <node pkg="$(arg project)" type="$(arg project)_featureExtraction_lessF"   name="$(arg project)_featureExtraction_lessF"    output="screen"     respawn="true"/>
     <!-- <node pkg="$(arg project)" type="$(arg project)_mapOptmization_lessF"      name="$(arg project)_mapOptmization_lessF"      output="screen"      respawn="true"/>   output="screen" -->
