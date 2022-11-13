@@ -70,29 +70,11 @@ public:
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("lio_sam/mapping/odometry", 5, &TransformFusion::lidarOdometryHandler, this, ros::TransportHints().tcpNoDelay());
         subImuOdometry   = nh.subscribe<nav_msgs::Odometry>(odomTopic+"_incremental",   2000, &TransformFusion::imuOdometryHandler,   this, ros::TransportHints().tcpNoDelay());
 
-        
-        // //FOR CHANGAN
-        // if (FOR_CHANGAN){
-        // subInitialLLA = nh.subscribe<sensor_msgs::NavSatFix>("Initial_lla", 1, &TransformFusion::llaHandler, this);
-        // pubGPSodom = nh.advertise<nav_msgs::Odometry>(gps_CHANGAN_odom, 2000);
-        // }
         file_imu.open(Odom_Path+"imu_odom.csv", std::ios::app);
         // //END
 
         pubImuOdometry   = nh.advertise<nav_msgs::Odometry>(odomTopic, 2000);
         pubImuPath       = nh.advertise<nav_msgs::Path>    ("lio_sam/imu/path", 1);
-
-        // //FOR CHANGAN
-        // lla_desinged = Eigen::Vector3d(39.9558587, 116.3104559, 45.0429878235);
-        
-        // Eigen::Quaternionf q = Eigen::Quaternionf(extRot.cast<float>());
-        // Eigen::Matrix4f exT_matrix = Eigen::Matrix4f::Identity();
-        // exT_matrix.block<3,3>(0,0) = q.toRotationMatrix();
-        // exT_matrix(0,3) = static_cast<float>(extTrans(0));
-        // exT_matrix(1,3) = static_cast<float>(extTrans(1));
-        // exT_matrix(2,3) = static_cast<float>(extTrans(2));
-        // exT_affine = exT_matrix;
-        // //END
     }
 
     ~TransformFusion(){
@@ -110,12 +92,6 @@ public:
         tf::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
         return pcl::getTransformation(x, y, z, roll, pitch, yaw);
     }
-
-    // //FOR CHANGAN
-    // void llaHandler(const sensor_msgs::NavSatFixConstPtr& gpslla){
-    //     lla = Eigen::Vector3d(gpslla->latitude, gpslla->longitude, gpslla->latitude);
-    // }
-    // //END
 
     void lidarOdometryHandler(const nav_msgs::Odometry::ConstPtr& odomMsg)
     {

@@ -220,42 +220,133 @@ public:
         imuQueue.push_back(thisImu);
     }
 
+    // void gpsRawHandler(const sensor_msgs::NavSatFix::ConstPtr& gpsRawMsg){
+    //     nav_msgs::Odometry gps_odom;
+    //     gps_odom.header.stamp = gpsRawMsg->header.stamp;
+    //     gps_odom.header.frame_id = "odom";
+    //     gps_odom.header.seq = gpsSequence++;
+        
+        
+    //     Eigen::Vector3d ENU;
+    //     ConvertLLAToENU(LLA_MAP, Eigen::Vector3d(gpsRawMsg->latitude, gpsRawMsg->longitude, gpsRawMsg->altitude), &ENU);
+    //     gps_odom.pose.pose.position.x = ENU(0);
+    //     gps_odom.pose.pose.position.y = ENU(1);
+    //     gps_odom.pose.pose.position.z = ENU(2);
+    //     gps_odom.pose.pose.orientation.w = gpsRawMsg->position_covariance[0];
+    //     gps_odom.pose.pose.orientation.x = gpsRawMsg->position_covariance[1];
+    //     gps_odom.pose.pose.orientation.y = gpsRawMsg->position_covariance[2];
+    //     gps_odom.pose.pose.orientation.z = gpsRawMsg->position_covariance[3];
+    //     gps_odom.pose.covariance = 
+    //     {0.0, 0.0, 0.0, 0.0, 
+    //     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    //     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    //     pubgpsodom.publish(gps_odom);
+
+    //     //add noise
+    //     // double w_sigma = 1.0;
+    //     // cv::RNG rng;
+    //     gps_odom.pose.pose.position.x = ENU(0)/*+rng.gaussian(w_sigma)*/;
+    //     gps_odom.pose.pose.position.y = ENU(1)/*+rng.gaussian(w_sigma)*/;
+    //     gps_odom.pose.pose.position.z = ENU(2)/*+rng.gaussian(w_sigma+5)*/;
+    //     gpsQueue.push_back(gps_odom);
+        
+    //     Eigen::Quaternionf Qw0_ik_(gpsRawMsg->position_covariance[0], gpsRawMsg->position_covariance[1], gpsRawMsg->position_covariance[2], gpsRawMsg->position_covariance[3]);
+    //     Eigen::Vector3f pose = - Qw0_ik_.toRotationMatrix() * extRot.transpose().cast<float>() * extTrans.cast<float>()
+    //                     + Eigen::Vector3d(gps_odom.pose.pose.position.x, gps_odom.pose.pose.position.y, gps_odom.pose.pose.position.z).cast<float>() 
+    //                     + coordinate_offset
+    //                     + Qw0_i0_.cast<float>() * lever_arm.cast<float>() - Qw0_ik_ * lever_arm.cast<float>();
+        
+    //     Eigen::Quaternionf Qw0_lk_(Qw0_ik_.toRotationMatrix() * extRot.transpose().cast<float>());
+    //     nav_msgs::Odometry gps_odom2;
+    //     gps_odom2.header.stamp = gpsRawMsg->header.stamp;
+    //     gps_odom2.header.frame_id = "odom";
+    //     gps_odom2.pose.pose.orientation.w = Qw0_lk_.w();
+    //     gps_odom2.pose.pose.orientation.x = Qw0_lk_.x();
+    //     gps_odom2.pose.pose.orientation.y = Qw0_lk_.y();
+    //     gps_odom2.pose.pose.orientation.z = Qw0_lk_.z();
+    //     gps_odom2.pose.pose.position.x = pose(0);
+    //     gps_odom2.pose.pose.position.y = pose(1);
+    //     gps_odom2.pose.pose.position.z = pose(2);
+    //     pubENUgps.publish(gps_odom2);
+
+
+    //     file_gps.setf(std::ios::fixed, std::_S_floatfield);
+    //     file_gps << gps_odom2.header.stamp.toSec() << " " 
+    //             << gps_odom2.pose.pose.position.x << " "
+    //             << gps_odom2.pose.pose.position.y << " "
+    //             << gps_odom2.pose.pose.position.z << " "
+    //             << gps_odom2.pose.pose.orientation.x << " "
+    //             << gps_odom2.pose.pose.orientation.y << " "
+    //             << gps_odom2.pose.pose.orientation.z << " "
+    //             << gps_odom2.pose.pose.orientation.w << std::endl;
+
+    //     std::lock_guard<std::mutex> lock3(gpsLock);
+
+    //     // gpsQueue.push_back(gps_odom2);
+    // }
+
     void gpsRawHandler(const sensor_msgs::NavSatFix::ConstPtr& gpsRawMsg){
         nav_msgs::Odometry gps_odom;
+        sensor_msgs::NavSatFix Initial_lla;
+        Initial_lla.header.stamp = gpsRawMsg->header.stamp;
         gps_odom.header.stamp = gpsRawMsg->header.stamp;
         gps_odom.header.frame_id = "odom";
         gps_odom.header.seq = gpsSequence++;
-        
-        
-        Eigen::Vector3d ENU;
-        ConvertLLAToENU(LLA_MAP, Eigen::Vector3d(gpsRawMsg->latitude, gpsRawMsg->longitude, gpsRawMsg->altitude), &ENU);
-        gps_odom.pose.pose.position.x = ENU(0);
-        gps_odom.pose.pose.position.y = ENU(1);
-        gps_odom.pose.pose.position.z = ENU(2);
-        gps_odom.pose.pose.orientation.w = gpsRawMsg->position_covariance[0];
-        gps_odom.pose.pose.orientation.x = gpsRawMsg->position_covariance[1];
-        gps_odom.pose.pose.orientation.y = gpsRawMsg->position_covariance[2];
-        gps_odom.pose.pose.orientation.z = gpsRawMsg->position_covariance[3];
-        gps_odom.pose.covariance = 
-        {0.0, 0.0, 0.0, 0.0, 
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-        pubgpsodom.publish(gps_odom);
+        if(gpsSequence  == 1){
+            cout<<"CURRENT GPS TIME: "<<setprecision(20)<<gpsRawMsg->header.stamp.toSec()<<endl;
+            gps_odom.pose.pose.position.x = 0;
+            gps_odom.pose.pose.position.y = 0;
+            gps_odom.pose.pose.position.z = 0;
+            gps_odom.pose.pose.orientation.w = gpsRawMsg->position_covariance[0];
+            gps_odom.pose.pose.orientation.x = gpsRawMsg->position_covariance[1];
+            gps_odom.pose.pose.orientation.y = gpsRawMsg->position_covariance[2];
+            gps_odom.pose.pose.orientation.z = gpsRawMsg->position_covariance[3];
+            gps_odom.pose.covariance = 
+            {0.0, 0.0, 0.0, 0.0, 
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            latitude = gpsRawMsg->latitude;
+            longitude = gpsRawMsg->longitude;
+            altitude = gpsRawMsg->altitude;
+            pubgpsodom.publish(gps_odom);
 
-        //add noise
-        // double w_sigma = 1.0;
-        // cv::RNG rng;
-        gps_odom.pose.pose.position.x = ENU(0)/*+rng.gaussian(w_sigma)*/;
-        gps_odom.pose.pose.position.y = ENU(1)/*+rng.gaussian(w_sigma)*/;
-        gps_odom.pose.pose.position.z = ENU(2)/*+rng.gaussian(w_sigma+5)*/;
-        gpsQueue.push_back(gps_odom);
-        
+            Qw0_i0_ = Eigen::Quaterniond(gps_odom.pose.pose.orientation.w, gps_odom.pose.pose.orientation.x,
+                                       gps_odom.pose.pose.orientation.y, gps_odom.pose.pose.orientation.z);
+            coordinate_offset = (Qw0_i0_.toRotationMatrix() * extRot.transpose() * extTrans).cast<float>();
+
+            //for ev200
+            Qw0_gps = Qw0_i0_;
+            cout<<"ImageProjection中,Qw0_i0_: "<<Qw0_i0_.w()<<" "
+                                               <<Qw0_i0_.x()<<" "
+                                               <<Qw0_i0_.y()<<" "
+                                               <<Qw0_i0_.z()<<endl;
+            cout<<"ImageProjection中,coordinate_offset: "<<coordinate_offset.transpose()<<endl;
+        }
+        else{
+            Eigen::Vector3d ENU;
+            ConvertLLAToENU(Eigen::Vector3d(latitude, longitude, altitude), 
+                                                    Eigen::Vector3d(gpsRawMsg->latitude, gpsRawMsg->longitude, gpsRawMsg->altitude), 
+                                                    &ENU);
+            gps_odom.pose.pose.position.x = ENU(0);
+            gps_odom.pose.pose.position.y = ENU(1);
+            gps_odom.pose.pose.position.z = ENU(2);
+            gps_odom.pose.pose.orientation.w = gpsRawMsg->position_covariance[0];
+            gps_odom.pose.pose.orientation.x = gpsRawMsg->position_covariance[1];
+            gps_odom.pose.pose.orientation.y = gpsRawMsg->position_covariance[2];
+            gps_odom.pose.pose.orientation.z = gpsRawMsg->position_covariance[3];
+            gps_odom.pose.covariance = 
+            {0.0, 0.0, 0.0, 0.0, 
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            pubgpsodom.publish(gps_odom);
+        }
+
         Eigen::Quaternionf Qw0_ik_(gpsRawMsg->position_covariance[0], gpsRawMsg->position_covariance[1], gpsRawMsg->position_covariance[2], gpsRawMsg->position_covariance[3]);
         Eigen::Vector3f pose = - Qw0_ik_.toRotationMatrix() * extRot.transpose().cast<float>() * extTrans.cast<float>()
                         + Eigen::Vector3d(gps_odom.pose.pose.position.x, gps_odom.pose.pose.position.y, gps_odom.pose.pose.position.z).cast<float>() 
                         + coordinate_offset
                         + Qw0_i0_.cast<float>() * lever_arm.cast<float>() - Qw0_ik_ * lever_arm.cast<float>();
-        
+        // cout<<"In imageprojection: "<<pose.transpose()<<endl;
         Eigen::Quaternionf Qw0_lk_(Qw0_ik_.toRotationMatrix() * extRot.transpose().cast<float>());
         nav_msgs::Odometry gps_odom2;
         gps_odom2.header.stamp = gpsRawMsg->header.stamp;
@@ -269,7 +360,6 @@ public:
         gps_odom2.pose.pose.position.z = pose(2);
         pubENUgps.publish(gps_odom2);
 
-
         file_gps.setf(std::ios::fixed, std::_S_floatfield);
         file_gps << gps_odom2.header.stamp.toSec() << " " 
                 << gps_odom2.pose.pose.position.x << " "
@@ -280,9 +370,9 @@ public:
                 << gps_odom2.pose.pose.orientation.z << " "
                 << gps_odom2.pose.pose.orientation.w << std::endl;
 
+        //给点云提供全局位姿消息
         std::lock_guard<std::mutex> lock3(gpsLock);
-
-        // gpsQueue.push_back(gps_odom2);
+        gpsQueue.push_back(gps_odom);
     }
 
     void odometryHandler(const nav_msgs::Odometry::ConstPtr& odometryMsg)

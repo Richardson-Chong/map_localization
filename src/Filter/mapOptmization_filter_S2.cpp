@@ -107,6 +107,7 @@ public:
     std::ofstream file_predict;
     std::ofstream file_update;
     std::ofstream file_imuInput;
+    std::ofstream file_State;
 
     ros::Publisher pubHistoryKeyFrames;
     ros::Publisher pubIcpKeyFrames;
@@ -308,11 +309,12 @@ public:
         downSizeFilterSurroundingKeyPoses.setLeafSize(surroundingKeyframeDensity, surroundingKeyframeDensity, surroundingKeyframeDensity); // for surrounding key poses of scan-to-map optimization
         downSizeFilterMapCloud.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
 
-        file_lidar.open(Odom_Path+"lidar_odom.csv", std::ios::app);
-        file_time.open(Odom_Path+"operation_time.csv", std::ios::app);
-        file_predict.open(Odom_Path+"predict_state.csv", std::ios::app);
-        // file_update.open(Odom_Path+"update_state.csv", std::ios::app);
-        file_imuInput.open(Odom_Path+"imuMeasure.csv", std::ios::app);
+        file_lidar.open(Odom_Path+"lidar_odom.txt", std::ios::app);
+        file_time.open(Odom_Path+"operation_time.txt", std::ios::app);
+        file_predict.open(Odom_Path+"predict_state.txt", std::ios::app);
+        file_update.open(Odom_Path+"update_state.csv", std::ios::app);
+        // file_imuInput.open(Odom_Path+"imuMeasure.csv", std::ios::app);
+        file_State.open(Odom_Path+"imuMeasure.csv", std::ios::app);
 
         allocateMemory();
 
@@ -327,6 +329,7 @@ public:
         file_predict.close();
         file_update.close();
         file_imuInput.close();
+        file_State.close();
     }
 
     void resetState()
@@ -534,15 +537,6 @@ public:
                 {
                     statePredict();
                     updateStatebyIeskf(timeLaserInfoCur - timeLastProcessing);
-
-                    // Eigen::Affine3f T_transformTobeMapped;
-                    // T_transformTobeMapped.setIdentity();
-                    // T_transformTobeMapped.pretranslate(filterState.rn_);
-                    // T_transformTobeMapped.rotate(filterState.qbn_);
-                    // pcl::getTranslationAndEulerAngles(T_transformTobeMapped, 
-                    //     transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-                    //     transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
-                    // transformUpdate();
                 }
                 // else scan2MapOptimization();
                 else return;
@@ -598,14 +592,14 @@ public:
             while(imuQueue.size()>size_t(imuQueSize)) imuQueue.pop_front();
             if(imuAlignImp()) imuAligned = true;
         }
-        file_imuInput.setf(std::ios::fixed, std::_S_floatfield);
-        file_imuInput << imuMsg->header.stamp.toSec() << "," 
-                << imuMsg->angular_velocity.x<< ","
-                << imuMsg->angular_velocity.y << ","
-                << imuMsg->angular_velocity.z << ","
-                << imuMsg->linear_acceleration.x << ","
-                << imuMsg->linear_acceleration.y << ","
-                << imuMsg->linear_acceleration.z  << std::endl;
+        // file_imuInput.setf(std::ios::fixed, std::_S_floatfield);
+        // file_imuInput << imuMsg->header.stamp.toSec() << "," 
+        //         << imuMsg->angular_velocity.x<< ","
+        //         << imuMsg->angular_velocity.y << ","
+        //         << imuMsg->angular_velocity.z << ","
+        //         << imuMsg->linear_acceleration.x << ","
+        //         << imuMsg->linear_acceleration.y << ","
+        //         << imuMsg->linear_acceleration.z  << std::endl;
     }
 
     void imuBiasHandler(const std_msgs::Float64MultiArray::ConstPtr& imuBiasMsg)
@@ -1367,10 +1361,10 @@ public:
 
     void statePredict()
     {
-        biasLock.lock();
-        filterState.ba_ = accBias.cast<float>();
-        filterState.bw_ = gyrBias.cast<float>();
-        biasLock.unlock();
+        // biasLock.lock();
+        // filterState.ba_ = accBias.cast<float>();
+        // filterState.bw_ = gyrBias.cast<float>();
+        // biasLock.unlock();
         //imu    last|---------------|---------------|cur
         //lidar   last|***************|***************|cur
 
@@ -1388,12 +1382,12 @@ public:
 
         float x, y, z, roll, pitch, yaw;
         pcl::getTranslationAndEulerAngles(T_transformTobeMapped, x, y, z, roll, pitch, yaw);
-        file_predict.setf(std::ios::fixed, std::_S_floatfield);
-        file_predict << frame_count << "," 
-                << roll<< ","<< pitch << ","<< yaw << ","
-                << x << ","<< y << ","<< z<< ","
-                << V_transformTobeMapped[0] << ","<< V_transformTobeMapped[1] << ","<< V_transformTobeMapped[2]<< ","
-                << std::endl;
+        // file_predict.setf(std::ios::fixed, std::_S_floatfield);
+        // file_predict << frame_count << "," 
+        //         << roll<< ","<< pitch << ","<< yaw << ","
+        //         << x << ","<< y << ","<< z<< ","
+        //         << V_transformTobeMapped[0] << ","<< V_transformTobeMapped[1] << ","<< V_transformTobeMapped[2]<< ","
+        //         << std::endl;
         
         Eigen::Vector3f un_acc_last, un_gyr_last, un_acc_next, un_gyr_next;
 
@@ -1600,18 +1594,18 @@ public:
         
         residual_   = Eigen::Matrix<float, Eigen::Dynamic, 1>::Zero(laserCloudSelNum, 1);
         TicToc t_1;
-        R           = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Zero(laserCloudSelNum, laserCloudSelNum);
+        // R           = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Zero(laserCloudSelNum, laserCloudSelNum);
         t_1.toc("Initialize R");
         if(!USE_S2)
         {
             H_k         = Eigen::Matrix<float, Eigen::Dynamic, 18>::Zero(laserCloudSelNum, 18);
-            H_k_T_R_inv = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
+            // H_k_T_R_inv = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
             K_k         = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
         }
         else
         {
             H_k         = Eigen::Matrix<float, Eigen::Dynamic, 17>::Zero(laserCloudSelNum, 17);
-            H_k_T_R_inv = Eigen::Matrix<float, 17, Eigen::Dynamic>::Zero(17, laserCloudSelNum);
+            // H_k_T_R_inv = Eigen::Matrix<float, 17, Eigen::Dynamic>::Zero(17, laserCloudSelNum);
             K_k         = Eigen::Matrix<float, 17, Eigen::Dynamic>::Zero(17, laserCloudSelNum);
         }
 
@@ -1633,11 +1627,9 @@ public:
 
             H_k.block<1, 3>(i, POS_) = Jr_pt.transpose() * Jpt_trans / feature_param.roll;
             H_k.block<1, 3>(i, ROT_) = Jr_pt.transpose() * Jpt_Aa * JAa_deltaAa / feature_param.roll;
-            H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll;
-            // H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll / sqrt_lidar_std;
+            // H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll;
             residual_(i, 0) = 0 - feature_param.intensity / feature_param.roll;
-            R(i, i) = 1.0 / feature_param.roll;
-            // R(i, i) = 1.0 / feature_param.roll * sqrt_lidar_std;
+            // R(i, i) = 1.0 / feature_param.roll;
         } 
         
         errVec_ = move(intermediateState - filterState);
@@ -1670,11 +1662,17 @@ public:
 
         Eigen::MatrixXf P_tmp = LIDAR_STD * Jt_inv.transpose() * P_t_inv * Jt_inv;
         
-        HRH = H_k_T_R_inv*H_k+P_tmp;
-        // ROS_INFO_STREAM("HRH: "<<endl<<HRH<<endl<<endl);
+        // HRH = H_k_T_R_inv*H_k+P_tmp;
+        // // ROS_INFO_STREAM("HRH: "<<endl<<HRH<<endl<<endl);
+        // HRH_inv = HRH.colPivHouseholderQr().inverse();
+        // K_k = HRH_inv * H_k_T_R_inv;
+        // // ROS_INFO_STREAM("K_k: "<<endl<<K_k<<endl<<endl);
+
+        //faster_lio_sam方法
+        HRH = H_k.transpose()*H_k+P_tmp;
         HRH_inv = HRH.colPivHouseholderQr().inverse();
-        K_k = HRH_inv * H_k_T_R_inv;
-        // ROS_INFO_STREAM("K_k: "<<endl<<K_k<<endl<<endl);
+        K_k = HRH_inv * H_k.transpose();
+        //END
 
         //calculate dxj0
         updateVec_ = -J_t * (errVec_) + K_k * (residual_ + H_k * J_t * errVec_);
@@ -1734,10 +1732,10 @@ public:
         Eigen::MatrixXf partial = Imat - K_k * H_k;
         t_1.toc("Calculate I-KH");
         // //method 1 P
-        // P_t = (Imat - K_k * H_k) * J_t * P_t * J_t.transpose();
+        // P_t = partial * J_t * P_t * J_t.transpose();
         // //method 2 P positive and symmetric
         TicToc t_filter;
-        P_t = partial * J_t * P_t * J_t.transpose() * partial.transpose() + K_k * R * K_k.transpose();
+        P_t = partial * J_t * P_t * J_t.transpose() * partial.transpose() + K_k /* R*/ * K_k.transpose();
         t_filter.toc("Calculate P_t");
         // //method 3 P symmetric
         // Eigen::MatrixXf Ptangent = J_t * P_t * J_t.transpose();
@@ -2944,6 +2942,15 @@ public:
         file_lidar << laserOdometryROS.header.stamp.toSec() << " " 
                 << transformTobeMapped[3] << " "<< transformTobeMapped[4] << " "<< transformTobeMapped[5] << " "
                 << q_temp.x << " "<< q_temp.y << " "<< q_temp.z << " "<< q_temp.w
+                << std::endl;
+        
+        file_State.setf(std::ios::fixed, std::_S_floatfield);
+        file_State << laserOdometryROS.header.stamp.toSec() << "," 
+                << transformTobeMapped[3] << ","<< transformTobeMapped[4] << ","<< transformTobeMapped[5] << ","
+                << q_temp.x << ","<< q_temp.y << ","<< q_temp.z << ","<< q_temp.w << ","
+                << filterState.ba_[0] << ","<< filterState.ba_[1] << ","<< filterState.ba_[2] << ","
+                << filterState.bw_[0] << ","<< filterState.bw_[1] << ","<< filterState.bw_[2] << ","
+                << filterState.gn_[0] << ","<< filterState.gn_[1] << ","<< filterState.gn_[2]
                 << std::endl;
         
         // Publish TF

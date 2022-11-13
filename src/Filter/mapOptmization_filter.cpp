@@ -71,6 +71,7 @@ public:
     Eigen::Matrix<float, 18, Eigen::Dynamic> K_k;
     Eigen::MatrixXf updateVec_;
     Eigen::Matrix<float, 18, 1> errVec_;
+    Eigen::Matrix<float, 6, 6> HRHminuP;
     Eigen::Matrix<float, 18, 18> HRH;
     Eigen::Matrix<float, 18, 18> HRH_inv;
     Eigen::MatrixXf R;
@@ -89,7 +90,8 @@ public:
     bool converge = false;
     bool hasDiverged = false;
     bool residualNorm = 10e6;
-    bool imuAligned = false;
+    bool imuAligned = true;
+    bool degenerate = false;
     Vector3d mean_acc;
 
     ros::Publisher pubLaserCloudSurround;
@@ -105,6 +107,7 @@ public:
     std::ofstream file_predict;
     std::ofstream file_update;
     std::ofstream file_imuInput;
+    std::ofstream file_corres_evalue;
 
     ros::Publisher pubHistoryKeyFrames;
     ros::Publisher pubIcpKeyFrames;
@@ -311,6 +314,7 @@ public:
         file_predict.open(Odom_Path+"predict_state.csv", std::ios::app);
         file_update.open(Odom_Path+"update_state.csv", std::ios::app);
         file_imuInput.open(Odom_Path+"imuMeasure.csv", std::ios::app);
+        file_corres_evalue.open(Odom_Path+"corresNum_eValues.csv", std::ios::app);
 
         allocateMemory();
 
@@ -325,6 +329,7 @@ public:
         file_predict.close();
         file_update.close();
         file_imuInput.close();
+        file_corres_evalue.close();
     }
 
     void resetState()
@@ -473,6 +478,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx);
 
         static double timeLastProcessing = -1;
+        static double timeStart = -1;
         if (timeLaserInfoCur - timeLastProcessing >= mappingProcessInterval)
         {
             // timeLastProcessing = timeLaserInfoCur;
@@ -505,17 +511,7 @@ public:
                 {
                     statePredict();
                     updateStatebyIeskf(timeLaserInfoCur - timeLastProcessing);
-
-                    // Eigen::Affine3f T_transformTobeMapped;
-                    // T_transformTobeMapped.setIdentity();
-                    // T_transformTobeMapped.pretranslate(filterState.rn_);
-                    // T_transformTobeMapped.rotate(filterState.qbn_);
-                    // pcl::getTranslationAndEulerAngles(T_transformTobeMapped, 
-                    //     transformTobeMapped[3], transformTobeMapped[4], transformTobeMapped[5], 
-                    //     transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
-                    // transformUpdate();
                 }
-                // else scan2MapOptimization();
                 else return;
             }
             t_FilterProcess.toc("Filter Process");
@@ -535,6 +531,7 @@ public:
             cout<<endl<<endl;
 
             timeLastProcessing = timeLaserInfoCur;
+            if(timeStart == -1) timeStart = timeLastProcessing;
 
             file_time.setf(std::ios::fixed, std::_S_floatfield);
             file_time << timeLastProcessing << ","
@@ -544,6 +541,12 @@ public:
                       << t_gtsam.elapsed_ms << ","
                       << t_All.elapsed_ms << ","
                       <<std::endl;
+
+            file_corres_evalue.setf(std::ios::fixed, std::_S_floatfield);
+            file_corres_evalue << (timeLastProcessing - timeStart) <<",";
+
+            file_update.setf(std::ios::fixed, std::_S_floatfield);
+            file_update << (timeLastProcessing - timeStart) << std::endl;
         }
     }
 
@@ -1253,6 +1256,11 @@ public:
             //整个修改
             //for imu align
             //没问题，但是始终无法知道和g对齐后的坐标系和ENU坐标系之间差的yaw是多少
+            // //随意路段测试的角度初始化
+            transformTobeMapped[0] = 0.029293;
+            transformTobeMapped[1] = 0.035363;
+            transformTobeMapped[2] = 0.000523;
+            // //END
             Imu2Lidar();
             stateInitialization();
             first_lidar_frame = false;
@@ -1339,10 +1347,10 @@ public:
 
     void statePredict()
     {
-        biasLock.lock();
-        filterState.ba_ = accBias.cast<float>();
-        filterState.bw_ = gyrBias.cast<float>();
-        biasLock.unlock();
+        // biasLock.lock();
+        // filterState.ba_ = accBias.cast<float>();
+        // filterState.bw_ = gyrBias.cast<float>();
+        // biasLock.unlock();
         //imu    last|---------------|---------------|cur
         //lidar   last|***************|***************|cur
 
@@ -1553,7 +1561,7 @@ public:
         transPointAssociateToMap = trans2Affine3f(transformTobeMapped);
     }
 
-    bool updateTransformationIESKF()
+    bool updateTransformationIESKF(const int& iterCount)
     {
         int laserCloudSelNum = laserCloudOri->size();
         if (laserCloudSelNum < 50) {
@@ -1566,81 +1574,159 @@ public:
         using M4f = Eigen::Matrix4f;
         
         residual_   = Eigen::Matrix<float, Eigen::Dynamic, 1>::Zero(laserCloudSelNum, 1);
-        R           = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Zero(laserCloudSelNum, laserCloudSelNum);
+        // R           = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Zero(laserCloudSelNum, laserCloudSelNum);
         H_k         = Eigen::Matrix<float, Eigen::Dynamic, 18>::Zero(laserCloudSelNum, 18);
         H_k_T_R_inv = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
         K_k         = Eigen::Matrix<float, 18, Eigen::Dynamic>::Zero(18, laserCloudSelNum);
         
         cout<<"Total corres nums: "<<laserCloudSelNum<<endl<<endl;
 
+        float srx = sin(transformTobeMapped[0]);
+        float crx = cos(transformTobeMapped[0]);
+        float sry = sin(transformTobeMapped[1]);
+        float cry = cos(transformTobeMapped[1]);
+        float srz = sin(transformTobeMapped[2]);
+        float crz = cos(transformTobeMapped[2]);
+
         //Euler state
         for(int i=0; i< laserCloudSelNum; ++i)
         {
-            PointType pt_orig = laserCloudOri->points[i];
-            PointXYZIRPYT feature_param = coeffSel->points[i];
-            V3f pt_orig_coor = V3f(pt_orig.x, pt_orig.y, pt_orig.z);
+            // PointType pt_orig = laserCloudOri->points[i];
+            // PointXYZIRPYT feature_param = coeffSel->points[i];
+            // V3f pt_orig_coor = V3f(pt_orig.x, pt_orig.y, pt_orig.z);
 
             
-            float roll = intermediateState.euler_[0], pitch = intermediateState.euler_[1], yaw = intermediateState.euler_[2];
-            float croll = cos(roll), sroll = sin(roll), 
-                  cpitch = cos(pitch), spitch = sin(pitch), 
-                  cyaw = cos(yaw), syaw = sin(yaw);
-            V3f Jr_pt = V3f(feature_param.x, feature_param.y, feature_param.z);
-            M3f Jpt_Aa = intermediateState.qbn_ * GetSkewMatrix(-pt_orig_coor);
-            M3f Jpt_trans = M3f::Identity();
-            M3f Jpt_rot = M3f::Zero();
+            // float roll = intermediateState.euler_[0], pitch = intermediateState.euler_[1], yaw = intermediateState.euler_[2];
+            // float croll = cos(roll), sroll = sin(roll), 
+            //       cpitch = cos(pitch), spitch = sin(pitch), 
+            //       cyaw = cos(yaw), syaw = sin(yaw);
+            // V3f Jr_pt = V3f(feature_param.x, feature_param.y, feature_param.z);
+            // M3f Jpt_Aa = intermediateState.qbn_ * GetSkewMatrix(-pt_orig_coor);
+            // M3f Jpt_trans = M3f::Identity();
+            // M3f Jpt_rot = M3f::Zero();
 
-            Jpt_rot(0, 0) = (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[1] 
-                          + (croll * syaw - sroll * spitch * cyaw) * pt_orig_coor[2];
-            Jpt_rot(0, 1) = (-spitch * cyaw) * pt_orig_coor[0]
-                          + (sroll * cpitch * cyaw) * pt_orig_coor[1]
-                          + (croll * cpitch * cyaw) * pt_orig_coor[2];
-            Jpt_rot(0, 2) = (-cpitch * syaw) * pt_orig_coor[0]
-                          + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[1]
-                          + (sroll * cyaw - croll * spitch * syaw) * pt_orig_coor[2];
+            // Jpt_rot(0, 0) = (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[1] 
+            //               + (croll * syaw - sroll * spitch * cyaw) * pt_orig_coor[2];
+            // Jpt_rot(0, 1) = (-spitch * cyaw) * pt_orig_coor[0]
+            //               + (sroll * cpitch * cyaw) * pt_orig_coor[1]
+            //               + (croll * cpitch * cyaw) * pt_orig_coor[2];
+            // Jpt_rot(0, 2) = (-cpitch * syaw) * pt_orig_coor[0]
+            //               + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[1]
+            //               + (sroll * cyaw - croll * spitch * syaw) * pt_orig_coor[2];
             
-            Jpt_rot(1, 0) = (-sroll * cyaw + croll * spitch * syaw) * pt_orig_coor[1]
-                          + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[2];
-            Jpt_rot(1, 1) = (-spitch * syaw) * pt_orig_coor[0]
-                          + (sroll * cpitch * syaw) * pt_orig_coor[1];
-                          + (croll * cpitch * syaw) * pt_orig_coor[2];
-            Jpt_rot(1, 2) = (cpitch * cyaw) * pt_orig_coor[0]
-                          + (-croll * syaw + sroll * spitch * cyaw) * pt_orig_coor[1]
-                          + (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[2];
+            // Jpt_rot(1, 0) = (-sroll * cyaw + croll * spitch * syaw) * pt_orig_coor[1]
+            //               + (-sroll * spitch * syaw - croll * cyaw) * pt_orig_coor[2];
+            // Jpt_rot(1, 1) = (-spitch * syaw) * pt_orig_coor[0]
+            //               + (sroll * cpitch * syaw) * pt_orig_coor[1];
+            //               + (croll * cpitch * syaw) * pt_orig_coor[2];
+            // Jpt_rot(1, 2) = (cpitch * cyaw) * pt_orig_coor[0]
+            //               + (-croll * syaw + sroll * spitch * cyaw) * pt_orig_coor[1]
+            //               + (croll * spitch * cyaw + sroll * syaw) * pt_orig_coor[2];
             
-            Jpt_rot(2, 0) = (croll * cpitch) * pt_orig_coor[1]
-                          + (-sroll * cpitch) * pt_orig_coor[2];
-            Jpt_rot(2, 1) = (-cpitch) * pt_orig_coor[0]
-                          + (-sroll * spitch) * pt_orig_coor[1]
-                          + (-croll * spitch) * pt_orig_coor[2];
-            Jpt_rot(2, 2) = 0;
+            // Jpt_rot(2, 0) = (croll * cpitch) * pt_orig_coor[1]
+            //               + (-sroll * cpitch) * pt_orig_coor[2];
+            // Jpt_rot(2, 1) = (-cpitch) * pt_orig_coor[0]
+            //               + (-sroll * spitch) * pt_orig_coor[1]
+            //               + (-croll * spitch) * pt_orig_coor[2];
+            // Jpt_rot(2, 2) = 0;
 
 
-            H_k.block<1, 3>(i, POS_) = Jr_pt.transpose() * Jpt_trans / feature_param.roll;
-            H_k.block<1, 3>(i, ROT_) = Jr_pt.transpose() * Jpt_rot / feature_param.roll;
-            // H_k(i, ROT_) = 0;
-            // H_k(i, ROT_+1) = 0;
+            // H_k.block<1, 3>(i, POS_) = Jr_pt.transpose() * Jpt_trans / feature_param.roll;
+            // H_k.block<1, 3>(i, ROT_) = Jr_pt.transpose() * Jpt_rot / feature_param.roll;
+            // // H_k(i, ROT_) = 0;
+            // // H_k(i, ROT_+1) = 0;
 
-            H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll;
-            residual_(i, 0) = 0 - feature_param.intensity / feature_param.roll;
-            R(i, i) = 1.0 / feature_param.roll;
+            // H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * feature_param.roll;
+            // residual_(i, 0) = 0 - feature_param.intensity / feature_param.roll;
+            // R(i, i) = 1.0 / feature_param.roll;
+
+            //faster_lio_sam方法
+            PointType pointOri, coeff;
+            pointOri.x = laserCloudOri->points[i].x;
+            pointOri.y = laserCloudOri->points[i].y;
+            pointOri.z = laserCloudOri->points[i].z;
+
+            coeff.x = coeffSel->points[i].x;
+            coeff.y = coeffSel->points[i].y;
+            coeff.z = coeffSel->points[i].z;
+            coeff.intensity = coeffSel->points[i].intensity;
+            float& px = pointOri.x; float& py = pointOri.y; float& pz = pointOri.z;
+            float& nx = coeff.x; float& ny = coeff.y; float& nz = coeff.z;
+            float arx = py*(nx*(srx*srz + crx*crz*sry) - ny*(crz*srx - crx*sry*srz) +
+                        nz*crx*cry) - pz*(ny*(crx*crz + srx*sry*srz) - nx*(crx*srz - crz*srx*sry) + nz*cry*srx);
+            float ary = pz*(nx*crx*cry*crz - nz*crx*sry + ny*crx*cry*srz) + py*(nx*cry*crz*srx -
+                        nz*srx*sry + ny*cry*srx*srz) - px*(nz*cry + nx*crz*sry + ny*sry*srz);
+            float arz = px*(ny*cry*crz - nx*cry*srz) - py*(nx*(crx*crz + srx*sry*srz) +
+                        ny*(crx*srz - crz*srx*sry)) + pz*(nx*(crz*srx - crx*sry*srz) +
+                        ny*(srx*srz + crx*crz*sry));
+
+            H_k(i, ROT_+0) = arx;
+            H_k(i, ROT_+1) = ary;
+            H_k(i, ROT_+2) = arz;
+            H_k(i, POS_+0) = coeff.x;
+            H_k(i, POS_+1) = coeff.y;
+            H_k(i, POS_+2) = coeff.z;
+            residual_(i, 0) = -0.1 * coeff.intensity;
+
+            // H_k_T_R_inv.block<6, 1>(0, i) = H_k.block<1, 6>(i, 0).transpose() * coeffSel->points[i].roll;
+            // R(i, i) = 1.0 / coeffSel->points[i].roll;
+            //END
         }
         
-        errVec_ = move(intermediateState - filterState);
+        // errVec_ = move(intermediateState - filterState);
         // ROS_INFO_STREAM("errVec_: "<<endl<<errVec_.transpose()<<endl<<endl);
 
-        //check LIDAR_STD
-        Eigen::Matrix<float, 18, 18> P_tmp = LIDAR_STD * P_t_inv;
-        
-        HRH = H_k_T_R_inv*H_k+P_tmp;
-        // ROS_INFO_STREAM("HRH: "<<endl<<HRH<<endl<<endl);
+        // //check LIDAR_STD
+        // Eigen::Matrix<float, 18, 18> P_tmp = LIDAR_STD * P_t_inv;
+        // HRH = H_k_T_R_inv*H_k+P_tmp;
+        // // ROS_INFO_STREAM("HRH: "<<endl<<HRH<<endl<<endl);
+        // HRH_inv = HRH.colPivHouseholderQr().inverse();
+        // K_k = HRH_inv * H_k_T_R_inv;
+        // // ROS_INFO_STREAM("K_k: "<<endl<<K_k<<endl<<endl);
+
+        //faster_lio_sam方法
+        Eigen::Matrix<float, 18, 18> P_tmp = LIDAR_STD*P_t_inv;
+        HRH = H_k.transpose() * H_k;
+        HRHminuP = HRH.block<6, 6>(0, 0);
+        HRH += P_tmp;
         HRH_inv = HRH.colPivHouseholderQr().inverse();
-        K_k = HRH_inv * H_k_T_R_inv;
-        // ROS_INFO_STREAM("K_k: "<<endl<<K_k<<endl<<endl);
+        K_k = HRH_inv * H_k.transpose();
+        //END
+
+        // //Degeneracy test
+        // static Eigen::Matrix<float, 6, 6> mat_V_f, mat_V_p;
+        // static Eigen::Matrix<float, 1, 6> mat_E;
+        // if(!iterCount)
+        // {
+        //     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6> > esolver(HRH.block<6, 6>(0, 0));
+        //     mat_E = esolver.eigenvalues().real();
+        //     mat_V_f = esolver.eigenvectors().real(); 
+        //     mat_V_p = mat_V_f;
+        //     for(int i=0; i<6; ++i){
+        //         if(mat_E(0, i) < 800.0)
+        //         {
+        //             mat_V_p.col(i) = Eigen::Matrix<float, 6, 1>::Zero();
+        //             degenerate = true;
+        //         }    
+        //         else break;
+        //     }
+        //     if(degenerate)
+        //         ROS_WARN("!!!!!DEGENERATED!!!!!");
+        // }
+        // //END
+
 
         //calculate dxj0
         updateVec_ = - (errVec_) + K_k * (residual_ + H_k * errVec_);
         // ROS_INFO_STREAM("updateVec_: "<<endl<<updateVec_<<endl<<endl);
+
+        // //Degeneracy test
+        // if(degenerate)
+        // {
+        //     Eigen::Matrix<float, 6, 6> mat_P = (mat_V_f.transpose()).inverse() * mat_V_p.transpose();
+        //     updateVec_.block<6, 1>(0, 0) = mat_P * updateVec_.block<6, 1>(0, 0);
+        // }
+        // //END
 
         // Divergence determination
         bool hasNaN = false;
@@ -1662,23 +1748,23 @@ public:
         //     return false;
         // }
 
-        intermediateState += updateVec_;
-        M4f tmpM = M4f::Identity();
-        tmpM.block<3, 3>(0, 0) = intermediateState.qbn_.toRotationMatrix();
-        tmpM.block<3, 1>(0, 3) = intermediateState.rn_;
-        Affine2trans(transformTobeMapped, Eigen::Affine3f(tmpM));
-        // ROS_INFO_STREAM("updated state: "<<endl<<intermediateState.qbn_.vec()<<" "
-        //                                         <<intermediateState.rn_.transpose()<<" "
-        //                                         <<intermediateState.vn_.transpose()<<endl);
+        //faster_lio_sam
+        errVec_ += updateVec_;
+        transformTobeMapped[0] += updateVec_(ROT_+0, 0);
+        transformTobeMapped[1] += updateVec_(ROT_+1, 0);
+        transformTobeMapped[2] += updateVec_(ROT_+2, 0);
+        transformTobeMapped[3] += updateVec_(POS_+0, 0);
+        transformTobeMapped[4] += updateVec_(POS_+1, 0);
+        transformTobeMapped[5] += updateVec_(POS_+2, 0);
+        //END
 
-        file_update.setf(std::ios::fixed, std::_S_floatfield);
-        file_update << frame_count << "," 
-                << updateVec_(0, 0)<< ","<< updateVec_(1, 0) << ","<< updateVec_(2, 0) << ","
-                << updateVec_(3, 0)<< ","<< updateVec_(4, 0) << ","<< updateVec_(5, 0) << ","
-                << updateVec_(6, 0)<< ","<< updateVec_(7, 0) << ","<< updateVec_(8, 0) << ","
-                << updateVec_(9, 0)<< ","<< updateVec_(10, 0) << ","<< updateVec_(11, 0) << ","
-                << updateVec_(12, 0)<< ","<< updateVec_(13, 0) << ","<< updateVec_(14, 0) << ","
-                << std::endl;
+        file_update << updateVec_(0, 0)<< ","<< updateVec_(1, 0) << ","<< updateVec_(2, 0) << ","
+                    << updateVec_(3, 0)<< ","<< updateVec_(4, 0) << ","<< updateVec_(5, 0) << ","
+                    << updateVec_(6, 0)<< ","<< updateVec_(7, 0) << ","<< updateVec_(8, 0) << ","
+                    << updateVec_(9, 0)<< ","<< updateVec_(10, 0) << ","<< updateVec_(11, 0) << ","
+                    << updateVec_(12, 0)<< ","<< updateVec_(13, 0) << ","<< updateVec_(14, 0) << ","
+                    << updateVec_(15, 0)<< ","<< updateVec_(16, 0) << ","<< updateVec_(17, 0) << ","
+                    << std::endl;
 
         //check convegence
         //transition and rotation vector
@@ -1691,53 +1777,99 @@ public:
 
     void updateState(double dt)
     {
-        TicToc t_1;
+        // TicToc t_1;
         Eigen::MatrixXf partial = I18 - K_k * H_k;
-        t_1.toc("Calculate I-KH");
-        // //method 1 P
-        // P_t = (I18 - K_k * H_k) * J_t * P_t * J_t.transpose();
-        // //method 2 P positive and symmetric
-        TicToc t_filter;
-        P_t = partial * J_t * P_t * J_t.transpose() * partial.transpose() + K_k * R * K_k.transpose();
-        t_filter.toc("Calculate P_t");
-        // //method 3 P symmetric
-        // Eigen::MatrixXf Ptangent = J_t * P_t * J_t.transpose();
-        // P_t = Ptangent - K_k * (H_k * Ptangent * H_k.transpose() + R) * K_k.transpose();
+        // t_1.toc("Calculate I-KH");
+        // // //method 1 P
+        // P_t = partial * J_t * P_t * J_t.transpose();
+        // // //method 2 P positive and symmetric
+        // TicToc t_filter;
+        // // P_t = partial * J_t * P_t * J_t.transpose() * partial.transpose() + K_k * R * K_k.transpose();
+        // t_filter.toc("Calculate P_t");
+        // // //method 3 P symmetric
+        // // Eigen::MatrixXf Ptangent = J_t * P_t * J_t.transpose();
+        // // P_t = Ptangent - K_k * (H_k * Ptangent * H_k.transpose() + R) * K_k.transpose();
 
-        //set kth pose in lidar frame
-        filterState = intermediateState;
+        // //set kth pose in lidar frame
+        // filterState = intermediateState;
+        // cout<<"更新后的states: "<<endl
+        //                     <<filterState.euler_.transpose()<<" "<<endl
+        //                     <<filterState.rn_.transpose()<<" "<<endl
+        //                     <<filterState.vn_.transpose()<<" "<<endl
+        //                     <<filterState.ba_.transpose()<<" "<<endl
+        //                     <<filterState.bw_.transpose()<<" "<<endl
+        //                     <<filterState.gn_.transpose()<<" "<<endl
+        //                     <<endl;
+                            
+
+        // transformTobeMapped[0] = filterState.euler_[0];
+        // transformTobeMapped[1] = filterState.euler_[1];
+        // transformTobeMapped[2] = filterState.euler_[2];
+
+        // transformTobeMapped[3] = filterState.rn_[0];
+        // transformTobeMapped[4] = filterState.rn_[1];
+        // transformTobeMapped[5] = filterState.rn_[2];
+
+        // for(int i=0; i<3; i++)
+        // {
+        //     // 看作匀速运动
+        //     transformTobeMapped[VEL_+i] = (transformTobeMapped[3+i]-transformTobeMappedLast[3+i])/dt;
+        //     filterState.vn_(i) = transformTobeMapped[VEL_+i];
+
+        //     //速度直接从滤波结果获取
+        //     // transformTobeMapped[VEL_+i] = filterState.vn_[i];
+        // }
+        // for(int i=0; i<18; ++i) transformTobeMappedLast[i] = transformTobeMapped[i];
+
+
+        //faster_lio_sam
+        P_t = partial*P_t*partial.transpose()+K_k*K_k.transpose();
+        // P_t = partial * P_t * partial.transpose() + K_k * R * K_k.transpose();
+        // P_t = (I_-K_k*H_k)*P_t;
+        // ROS_INFO_STREAM(P_t<<endl);
+        errVec_.setZero();
+
+        for(int i=0; i<3; i++)
+        {
+            // 看作匀加速运动
+            transformTobeMapped[VEL_+i] = 2.0*(transformTobeMapped[3+i]-transformTobeMappedLast[3+i])/dt-transformTobeMappedLast[VEL_+i];
+            filterState.vn_(i) = transformTobeMapped[VEL_+i];
+        }
+        for(int i=0; i<18; ++i) transformTobeMappedLast[i] = transformTobeMapped[i];
+        // filterState.vn_ = Eigen::Vector3f(transformTobeMapped[VEL_+0], transformTobeMapped[VEL_+1], transformTobeMapped[VEL_+2]);
+        // 将transformTobeMapped转成矩阵形式
+        Eigen::Affine3f T_transformTobeMapped = trans2Affine3f(transformTobeMapped);
+        filterState.rn_ = T_transformTobeMapped.translation();
+        filterState.qbn_ = T_transformTobeMapped.rotation();
+        filterState.ba_ += updateVec_.block<3,1>(BIA_, 0);
+        filterState.bw_ += updateVec_.block<3,1>(BIG_, 0);
+        filterState.gn_ += updateVec_.block<3,1>(GW_, 0);
+
         cout<<"更新后的states: "<<endl
-                            <<filterState.euler_.transpose()<<" "<<endl
                             <<filterState.rn_.transpose()<<" "<<endl
                             <<filterState.vn_.transpose()<<" "<<endl
                             <<filterState.ba_.transpose()<<" "<<endl
                             <<filterState.bw_.transpose()<<" "<<endl
                             <<filterState.gn_.transpose()<<" "<<endl
                             <<endl;
-                            
+        //END
 
-        transformTobeMapped[0] = filterState.euler_[0];
-        transformTobeMapped[1] = filterState.euler_[1];
-        transformTobeMapped[2] = filterState.euler_[2];
+        // //degeneracy test
+        // Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6> > esolver1(HRHminuP);
+        // Eigen::Matrix<float, 1, 6> mat_E1 = esolver1.eigenvalues().real();
+        // Eigen::Matrix<float, 6, 6> mat_V_f1 = esolver1.eigenvectors().real(); 
+        // // Eigen::Matrix<float, 6, 6> mat_V_p = mat_V_f;
+        // for(int i=0; i<6; ++i){
+        //     file_corres_evalue << mat_E1(0, i) << ",";
+        // }
 
-        transformTobeMapped[3] = filterState.rn_[0];
-        transformTobeMapped[4] = filterState.rn_[1];
-        transformTobeMapped[5] = filterState.rn_[2];
-
-        for(int i=0; i<3; i++)
-        {
-            // 看作匀加速运动
-            // transformTobeMapped[VEL_+i] = 2.0*(transformTobeMapped[POS_+i]-transformTobeMappedLast[POS_+i])/dt-transformTobeMappedLast[VEL_+i];
-            // filterState.vn_(i) = transformTobeMapped[VEL_+i];
-
-            // 看作匀速运动
-            transformTobeMapped[VEL_+i] = (transformTobeMapped[3+i]-transformTobeMappedLast[3+i])/dt;
-            filterState.vn_(i) = transformTobeMapped[VEL_+i];
-
-            //速度直接从滤波结果获取
-            // transformTobeMapped[VEL_+i] = filterState.vn_[i];
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<float, 6, 6> > esolver2(HRH.block<6, 6>(0, 0));
+        Eigen::Matrix<float, 1, 6> mat_E2 = esolver2.eigenvalues().real();
+        Eigen::Matrix<float, 6, 6> mat_V_f2 = esolver2.eigenvectors().real(); 
+        for(int i=0; i<6; ++i){
+            file_corres_evalue << mat_E2(0, i) << ",";
         }
-        for(int i=0; i<18; ++i) transformTobeMappedLast[i] = transformTobeMapped[i];
+        degenerate = false;
     }
 
     void updateStatebyNotConverge(double dt)
@@ -1752,10 +1884,10 @@ public:
                             <<filterState.gn_.transpose()<<" "<<endl
                             <<endl;
         
-        
-        transformTobeMapped[0] = filterState.euler_[0];
-        transformTobeMapped[1] = filterState.euler_[1];
-        transformTobeMapped[2] = filterState.euler_[2];
+        Eigen::Vector3f rpy = filterState.qbn_.toRotationMatrix().eulerAngles(0,1,2);
+        transformTobeMapped[0] = rpy[0];
+        transformTobeMapped[1] = rpy[1];
+        transformTobeMapped[2] = rpy[2];
 
         transformTobeMapped[3] = filterState.rn_[0];
         transformTobeMapped[4] = filterState.rn_[1];
@@ -1804,7 +1936,7 @@ public:
                 }
                 surfOptimization();
                 combineOptimizationCoeffs(iterCount);
-                converge = updateTransformationIESKF();
+                converge = updateTransformationIESKF(iterCount);
 
                 if (converge)
                 {   
@@ -2117,11 +2249,19 @@ public:
 
                             float s = 1 - 0.9 * fabs(ld2);
 
-                            coeff.x = s * la;
-                            coeff.y = s * lb;
-                            coeff.z = s * lc;
-                            coeff.intensity = s * ld2;
+                            // coeff.x = s * la;
+                            // coeff.y = s * lb;
+                            // coeff.z = s * lc;
+                            // coeff.intensity = s * ld2;
+                            // coeff.roll = s;
+
+                            //faster_lio_sam
+                            coeff.x = la;
+                            coeff.y = lb;
+                            coeff.z = lc;
+                            coeff.intensity = ld2;
                             coeff.roll = s;
+                            //END
 
                             if (s > 0.1) {
 
@@ -2232,11 +2372,19 @@ public:
 
                         float s = 1 - 0.9 * fabs(ld2);
 
-                        coeff.x = s * la;
-                        coeff.y = s * lb;
-                        coeff.z = s * lc;
-                        coeff.intensity = s * ld2;
+                        // coeff.x = s * la;
+                        // coeff.y = s * lb;
+                        // coeff.z = s * lc;
+                        // coeff.intensity = s * ld2;
+                        // coeff.roll = s;
+
+                        //faster_lio_sam
+                        coeff.x = la;
+                        coeff.y = lb;
+                        coeff.z = lc;
+                        coeff.intensity = ld2;
                         coeff.roll = s;
+                        //END
 
                         if (s > 0.1) {
                             //feature test
@@ -2323,29 +2471,18 @@ public:
                     }
                     // static int cnt = 0;
                     if (planeValid) {
+                        //faster_lio_sam方法
                         float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-                        // if(cnt++%20 == 0){
-                        //     cout<<pd2<<endl;
-                        //     // cout<<"旋转前的点: "<<pointOri.x<<" "<<pointOri.y<<" "<<pointOri.z<<endl;
-                        //     // cout<<"旋转后的点: "<<pointSel.x<<" "<<pointSel.y<<" "<<pointSel.z<<endl;
-                        //     // for(int i=0; i<5; ++i){
-                        //     //     cout<<laserCloudSurfFromMapDS->points[pointSearchInd[i]].x<<" "
-                        //     //         <<laserCloudSurfFromMapDS->points[pointSearchInd[i]].y<<" "
-                        //     //         <<laserCloudSurfFromMapDS->points[pointSearchInd[i]].z<<" "<<endl;
-                        //     // }
-                        // }
-
                         float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
-                                + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
-                        
-                        //这里是可以尝试用voxelmap的方法来估计的
-                        coeff.x = s * pa;
-                        coeff.y = s * pb;
-                        coeff.z = s * pc;
-                        coeff.intensity = s * pd2;
-                        coeff.roll = s;
+                                 + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                        if(s > 0.9)
+                        {
+                            coeff.x = pa;
+                            coeff.y = pb;
+                            coeff.z = pc;
+                            coeff.intensity = pd2;
+                            coeff.roll = s;
 
-                        if (s > 0.9) {
                             //feature test
                             omp_set_lock(&lock2);
                             PointType pointSur_temp = pointSel;
@@ -2369,6 +2506,48 @@ public:
                             coeffSelSurfVec[i] = coeff;
                             laserCloudOriSurfFlag[i] = true;
                         }
+                        //END
+
+
+
+
+
+                        // float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
+
+                        // float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
+                        //         + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                        
+                        // //这里是可以尝试用voxelmap的方法来估计的
+                        // coeff.x = s * pa;
+                        // coeff.y = s * pb;
+                        // coeff.z = s * pc;
+                        // coeff.intensity = s * pd2;
+                        // coeff.roll = s;
+
+                        // if (s > 0.9) {
+                        //     //feature test
+                        //     omp_set_lock(&lock2);
+                        //     PointType pointSur_temp = pointSel;
+                        //     pointSur_temp.intensity = SurCorresCount;
+                        //     SurfSelected->push_back(pointSur_temp);
+
+                        //     for(int j = 0; j<5; j++){
+                        //         PointType point_temp;
+                        //         point_temp.x = laserCloudSurfFromMapDS->points[pointSearchInd[j]].x;
+                        //         point_temp.y = laserCloudSurfFromMapDS->points[pointSearchInd[j]].y;
+                        //         point_temp.z = laserCloudSurfFromMapDS->points[pointSearchInd[j]].z;
+                        //         point_temp.intensity = SurCorresCount;
+                        //         SurCorrespondence->push_back(point_temp);
+                        //     }
+                            
+                        //     SurCorresCount++;
+                        //     omp_unset_lock(&lock2);
+                        //     //END
+                            
+                        //     laserCloudOriSurfVec[i] = pointOri;
+                        //     coeffSelSurfVec[i] = coeff;
+                        //     laserCloudOriSurfFlag[i] = true;
+                        // }
                     }
                 }
             }
@@ -2426,19 +2605,18 @@ public:
                         }
                     }
 
-                    if (planeValid) {
+                    if (planeValid) {                        
+                        //faster_lio_sam方法
                         float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
-
                         float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
-                                + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
-
-                        coeff.x = s * pa;
-                        coeff.y = s * pb;
-                        coeff.z = s * pc;
-                        coeff.intensity = s * pd2;
-                        coeff.roll = s;
-
-                        if (s > 0.9) {
+                                 + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                        if(s > 0.9)
+                        {
+                            coeff.x = pa;
+                            coeff.y = pb;
+                            coeff.z = pc;
+                            coeff.intensity = pd2;
+                            coeff.roll = s;
 
                             //feature test
                             omp_set_lock(&lock2);
@@ -2463,6 +2641,48 @@ public:
                             coeffSelSurfVec[i] = coeff;
                             laserCloudOriSurfFlag[i] = true;
                         }
+                        //END
+
+
+
+
+
+                        // float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
+
+                        // float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
+                        //         + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+
+                        // coeff.x = s * pa;
+                        // coeff.y = s * pb;
+                        // coeff.z = s * pc;
+                        // coeff.intensity = s * pd2;
+                        // coeff.roll = s;
+
+                        // if (s > 0.9) {
+
+                        //     //feature test
+                        //     omp_set_lock(&lock2);
+                        //     PointType pointSur_temp = pointSel;
+                        //     pointSur_temp.intensity = SurCorresCount;
+                        //     SurfSelected->push_back(pointSur_temp);
+
+                        //     for(int j = 0; j<5; j++){
+                        //         PointType point_temp;
+                        //         point_temp.x = laserCloudSurfFromMapDS->points[pointSearchInd[j]].x;
+                        //         point_temp.y = laserCloudSurfFromMapDS->points[pointSearchInd[j]].y;
+                        //         point_temp.z = laserCloudSurfFromMapDS->points[pointSearchInd[j]].z;
+                        //         point_temp.intensity = SurCorresCount;
+                        //         SurCorrespondence->push_back(point_temp);
+                        //     }
+                            
+                        //     SurCorresCount++;
+                        //     omp_unset_lock(&lock2);
+                        //     //END
+                            
+                        //     laserCloudOriSurfVec[i] = pointOri;
+                        //     coeffSelSurfVec[i] = coeff;
+                        //     laserCloudOriSurfFlag[i] = true;
+                        // }
                     }
                 }
             }
@@ -2471,6 +2691,8 @@ public:
 
     void combineOptimizationCoeffs(int iterCount)
     {
+        int cornerSize = 0, surfSize = 0;
+
         // combine corner coeffs
         if(USEFULLFEATURE)
         {
@@ -2479,6 +2701,7 @@ public:
                     if (laserCloudOriCornerFlag[i] == true){
                         laserCloudOri->push_back(laserCloudOriCornerVec[i]);
                         coeffSel->push_back(coeffSelCornerVec[i]);
+                        ++cornerSize;
                     }
                 }
 
@@ -2486,6 +2709,7 @@ public:
                 if (laserCloudOriSurfFlag[i] == true){
                     laserCloudOri->push_back(laserCloudOriSurfVec[i]);
                     coeffSel->push_back(coeffSelSurfVec[i]);
+                    ++surfSize;
                 }
             }
         }
@@ -2495,6 +2719,7 @@ public:
                     if (laserCloudOriCornerFlag[i] == true){
                         laserCloudOri->push_back(laserCloudOriCornerVec[i]);
                         coeffSel->push_back(coeffSelCornerVec[i]);
+                        ++cornerSize;
                     }
                 }
 
@@ -2502,8 +2727,14 @@ public:
                 if (laserCloudOriSurfFlag[i] == true){
                     laserCloudOri->push_back(laserCloudOriSurfVec[i]);
                     coeffSel->push_back(coeffSelSurfVec[i]);
+                    ++surfSize;
                 }
             }
+        }
+
+        if(iterCount == 0){
+            file_corres_evalue << cornerSize << ","
+                               << surfSize << ",";
         }
 
         // reset flag for next iteration
@@ -2859,16 +3090,7 @@ public:
             <<transformInLidar[3]<<", "
             <<transformInLidar[4]<<", "
             <<transformInLidar[5]<<"]"<<endl<<endl;
-
-        // file_lidar.setf(std::ios::fixed, std::_S_floatfield);
-        // file_lidar << laserOdometryROS.header.stamp.toSec() << " " 
-        //         << laserOdometryROS.pose.pose.position.x << " "
-        //         << laserOdometryROS.pose.pose.position.y << " "
-        //         << laserOdometryROS.pose.pose.position.z << " "
-        //         << laserOdometryROS.pose.pose.orientation.x << " "
-        //         << laserOdometryROS.pose.pose.orientation.y << " "
-        //         << laserOdometryROS.pose.pose.orientation.z << " "
-        //         << laserOdometryROS.pose.pose.orientation.w << std::endl;
+        
         
         geometry_msgs::Quaternion q_temp = tf::createQuaternionMsgFromRollPitchYaw(transformTobeMapped[0], transformTobeMapped[1], transformTobeMapped[2]);
         file_lidar.setf(std::ios::fixed, std::_S_floatfield);
@@ -2876,6 +3098,14 @@ public:
                 << transformTobeMapped[3] << " "<< transformTobeMapped[4] << " "<< transformTobeMapped[5] << " "
                 << q_temp.x << " "<< q_temp.y << " "<< q_temp.z << " "<< q_temp.w
                 << std::endl;
+        
+        file_corres_evalue << transformTobeMapped[0] << ","
+                           << transformTobeMapped[1] << ","
+                           << transformTobeMapped[2] << ","
+                           << transformTobeMapped[3] << ","
+                           << transformTobeMapped[4] << ","
+                           << transformTobeMapped[5] << ","
+                           << std::endl;
         
         // Publish TF
         static tf::TransformBroadcaster br;
